@@ -1,0 +1,426 @@
+{
+  "name": "WF-01: Unified Intake (Supreme Architect - Final Fix)",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "id": "whisper-stt",
+      "name": "Whisper STT",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        240
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "8xFoketpNFZyU7Sp",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "nextWindow"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "local-ocr",
+      "name": "Local OCR (PDF/Docs)",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        600
+      ],
+      "onError": "nextWindow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  let rawValue = item.json.combined_intake_text || '';\n  let text = typeof rawValue === 'string' ? rawValue : JSON.stringify(rawValue);\n  const tokenMap = {};\n  const namePattern = /\\b(Mr|Mrs|Ms|Dr|Chief|Alhaji|Alhaja|Barr|Hon|Engr|Justice)\\.?\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*/g;\n  const matches = [...new Set(Array.from(text.matchAll(namePattern)).map(m => m[0]))];\n  matches.forEach((name, i) => { const token = `[PARTY_${i+1}]`; tokenMap[token] = name; text = text.split(name).join(token); });\n  return { json: { ...item.json, scrubbed_text: text, token_map: tokenMap } };\n});"
+      },
+      "id": "pii-scrub",
+      "name": "Privacy Firewall (PII Scrubber)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are the 'Supreme Architect Brain' of Oscar Legal Practitioners. Your goal is to analyze legal intake and categorize it for processing.\n\n### ACTION DEFINITIONS:\n1. 'search': Use if the user is asking for information about an existing case, client, or document (e.g., \"What is the status of...?\", \"Find the draft for...\").\n2. 'ingest': Use if the user is explicitly providing a document to be stored or filed (e.g., \"Save this to the folder\", \"File this attachment\").\n3. 'intake': Use for all new instructions, facts, case briefs, or client information requiring a legal action plan.\n\n### REQUIREMENT:\nYou MUST output valid JSON ONLY with the following schema:\n{\n  \"action\": \"intake | ingest | search\",\n  \"intent\": \"litigation | advisory | dispute_resolution | corporate | personal\",\n  \"summary\": \"Brief professional summary of the input\",\n  \"matter_type\": \"Specific area of law (e.g., Land Dispute, CAC Registration)\",\n  \"real_parties\": [\"Exact names of parties mentioned\"],\n  \"legal_plan\": {\n    \"objective\": \"The primary legal goal\",\n    \"orchestrator_agent\": \"research_agent | drafting_agent | crm_agent | court_agent\",\n    \"strategy_steps\": [\"Step 1\", \"Step 2\", \"Step 3\"]\n  },\n  \"urgency\": \"high | medium | low\"\n}",
+              "role": "system"
+            },
+            {
+              "content": "Analyze and classify the following intake data:\n\n{{ $json.scrubbed_text }}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "llm-brain",
+      "name": "Supreme Architect Brain",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [
+        2050,
+        460
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "8xFoketpNFZyU7Sp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Advanced Intake Parser: Routes results to Memory and Orchestrator\nconst brainOutput = $input.first().json;\n\n// 1. Gather original intake metadata\nlet intakeData = {};\ntry {\n  intakeData = $(\"Consolidate Intake package\").first().json;\n} catch (e) {\n  intakeData = $(\"Consolidate Intake package1\").first().json;\n}\n\n// 2. Parse AI Analysis\nlet analysis = {};\ntry {\n  const content = brainOutput.message?.content || '{}';\n  analysis = JSON.parse(content.replace(/```json|```/g, '').trim());\n} catch(e) {\n  analysis = { \n    action: 'intake', \n    summary: 'Detailed extraction failed. Proceeding with raw data.',\n    legal_plan: { objective: 'Process existing instructions', orchestrator_agent: 'research_agent' }\n  };\n}\n\n// 3. Final Package Delivery\nreturn [{\n  json: {\n    // Priority Header: Dictates WF-02 & WF-03 Routing\n    action: analysis.action || 'intake',\n    \n    // Legal Intelligence Data\n    ...analysis,\n    \n    // Metadata & Traceability\n    ...intakeData,\n    processed_at: new Date().toISOString(),\n    brain_model: \"gpt-4o-mini\"\n  }\n}];"
+      },
+      "id": "parser",
+      "name": "Final Payload Parser",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2300,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.0-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.0-flash"
+        },
+        "text": "You are a Legal OCR and evidence Analyzer. Extract any text and analyze the image context.",
+        "inputType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        420
+      ],
+      "id": "vision-ocr",
+      "name": "Vision OCR & Analysis",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "3pC4b1JNC7mx3pgU",
+          "name": "Google Gemini account"
+        }
+      },
+      "onError": "nextWindow"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "burst-wait",
+      "name": "Burst Aggregator (Wait 2s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        700,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "Testing Form",
+        "formDescription": "Test various types of input",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Email or message instruction",
+              "placeholder": "what do you have in mind?"
+            },
+            {
+              "fieldLabel": "upload file",
+              "fieldType": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        200,
+        460
+      ],
+      "id": "form-trigger",
+      "name": "On form submission",
+      "webhookId": "4e43d74c-8926-4b19-9a75-8e0ab9820fa4"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.media_type }}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "regex",
+              "value2": "/(audio|voice|og*|mp3|opus|m4a|wav|aac|flac|amr|mpeg|mpga|webm)/i",
+              "output": 0
+            },
+            {
+              "operation": "regex",
+              "value2": "/(jpg|jpeg|png|webp)/i",
+              "output": 1
+            },
+            {
+              "operation": "regex",
+              "value2": "/(pdf|doc|docx)/i",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "router-v2",
+      "name": "Advanced Content Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        920,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "sync-deadline",
+      "name": "Intake Sync Deadline",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Robust Intake Normalizer: Captures Text, Metadata, and Multiple Files\nconst items = $input.all();\nlet normalized = [];\n\nitems.forEach(item => {\n  const data = item.json;\n  const sender = data.From || data.message?.from?.id || data.from || data.body?.sender || 'unknown';\n  const group_id = `INTAKE-${Date.now()}`;\n\n  const textParts = [\n    data.textHtml, data.text, data.Body, data.message?.text, data.body?.content\n  ];\n\n  Object.keys(data).forEach(key => {\n    if (typeof data[key] === 'string' && !['From', 'from', 'sender', 'timestamp', 'channel'].includes(key)) {\n      if (!textParts.includes(data[key])) textParts.push(data[key]);\n    }\n  });\n\n  const clean_text = textParts.filter(part => typeof part === 'string' && part.trim() !== '').join('\\n---\\n').trim();\n  const channel = data.From ? 'whatsapp' : (data.message ? 'telegram' : (data.from ? 'email' : (clean_text.length > 0 ? 'form' : 'web')));\n\n  const attachments = item.binary ? Object.keys(item.binary) : [];\n  attachments.forEach((key, idx) => {\n    normalized.push({\n      json: {\n        sender, channel, timestamp: new Date().toISOString(),\n        original_instructions: clean_text, \n        media_type: item.binary[key].fileExtension || 'unknown',\n        intake_id: group_id,\n        is_deadline: false\n      },\n      binary: { data: item.binary[key] }\n    });\n  });\n\n  normalized.push({\n    json: {\n      sender, channel, timestamp: new Date().toISOString(),\n      original_instructions: clean_text,\n      media_type: 'payload_sync',\n      intake_id: group_id,\n      is_deadline: true\n    }\n  });\n});\nreturn normalized;"
+      },
+      "id": "norm-agg",
+      "name": "Universal Normalizer & Aggregator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Multi-Modal Aggregator: Combines Parallel Results Into One Package\nconst items = $input.all();\n\nconst isDeadlineTrigger = items.some(item => item.json.is_deadline === true);\n\nif (!isDeadlineTrigger) {\n  return []; \n}\n\nconst finalResults = [];\n\nconst extractText = (nodeName, label) => {\n  try {\n    // Node name MUST MATCH EXACTLY what is in the workflow canvas\n    const nodeItems = $(nodeName).all();\n    nodeItems.forEach(item => {\n      const text = item.json.text || \n                   item.json.message?.content || \n                   item.json.content || \n                   item.json.original_instructions || \n                   '';\n      if (text.trim()) {\n        finalResults.push(`[${label}]:\\n${text.trim()}`);\n      }\n    });\n  } catch (e) {}\n};\n\nextractText(\"Intake Sync Deadline\", \"LAWYER INSTRUCTIONS\");\nextractText(\"Whisper STT\", \"VOICE TRANSCRIPTION\");\nextractText(\"Vision OCR & Analysis\", \"IMAGE ANALYSIS\");\nextractText(\"Local OCR (PDF/Docs)\", \"DOCUMENT SCAN\");\n\nconst combined = [...new Set(finalResults)].join('\\n\\n' + '='.repeat(20) + '\\n\\n');\n\nreturn [{\n  json: {\n    ...items[0].json,\n    combined_intake_text: combined || \"No text instructions or data found.\",\n    processed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "aggregator",
+      "name": "Consolidate Intake package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/matter-memory",
+        "authentication": "headerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonParameters": false,
+        "body": "={{ JSON.stringify({\n  ...$json,\n  action: 'intake'\n}) }}",
+        "options": {}
+      },
+      "id": "commit",
+      "name": "Commit to Matter Memory (WF-02)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2550,
+        460
+      ]
+    }
+  ],
+  "connections": {
+    "Whisper STT": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intake package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Local OCR (PDF/Docs)": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intake package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Privacy Firewall (PII Scrubber)": {
+      "main": [
+        [
+          {
+            "node": "Supreme Architect Brain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supreme Architect Brain": {
+      "main": [
+        [
+          {
+            "node": "Final Payload Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Payload Parser": {
+      "main": [
+        [
+          {
+            "node": "Commit to Matter Memory (WF-02)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vision OCR & Analysis": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intake package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Burst Aggregator (Wait 2s)": {
+      "main": [
+        [
+          {
+            "node": "Advanced Content Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Universal Normalizer & Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advanced Content Router": {
+      "main": [
+        [
+          {
+            "node": "Whisper STT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Vision OCR & Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Local OCR (PDF/Docs)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intake Sync Deadline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intake Sync Deadline": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intake package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Universal Normalizer & Aggregator": {
+      "main": [
+        [
+          {
+            "node": "Burst Aggregator (Wait 2s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidate Intake package": {
+      "main": [
+        [
+          {
+            "node": "Privacy Firewall (PII Scrubber)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,466 @@
+{
+    "name": "WF-03: Master Legal Agent",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "orchestrator",
+                "authentication": "headerAuth",
+                "responseMode": "onReceived",
+                "options": {}
+            },
+            "id": "wh-master-agent",
+            "name": "Master Agent Intake",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                200,
+                400
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "oscar-secret-header",
+                    "name": "Oscar Internal Secret"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Prepare Master Context\nconst item = $input.first().json;\nconst mc = item.matter_context || item;\n\nreturn [{\n  json: {\n    ...item,\n    masked_text: mc.masked_text || item.masked_text || '',\n    token_map: mc.token_map || item.token_map || {},\n    matter_id: mc.matter_id || 'UNKNOWN',\n    channel: mc.channel || 'telegram',\n    sender: mc.sender || 'unknown'\n  }\n}];"
+            },
+            "id": "prep-context",
+            "name": "Prepare Agent Context",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                420,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "agent": "openAiFunctionsAgent",
+                "promptType": "define",
+                "text": "=Matter Request (PII Masked):\n{{ $json.masked_text }}\n\nMatter Type: {{ $json.matter_context.matter_type }}\nUrgency: {{ $json.matter_context.urgency }}\n\nPast Internal Precedents retrieved by Matter Memory for context:\n{{ JSON.stringify($json.memory_brief) }}",
+                "systemMessage": "You are the Master Legal Agent \u2014 the 'Supreme Architect' for a leading Nigerian law firm.\nYou manage the entire execution for any new matter, replacing disjointed research, drafting, and CRM agents into one unified operational mind.\n\nYOUR TOOLS:\n1. internal_memory: Use this to search past case files.\n2. lawpavilion_search: Use this to search Nigerian case law & statutes.\n3. web_search: Use this for general Nigerian legal news.\n\nYOUR TASKS:\n1. RESEARCH: Determine what precedents apply. Synthesize findings.\n2. DRAFTING: Draft the legal document / opinion / court process required. Tone must be Nigerian legal standard.\n3. CRM/CONTENT: Draft a cover email for the client explaining the draft, and 1 LinkedIn post summarizing the legal principle. Ensure compliance with Nigerian RPC 2007 (no solicitation).\n\nOUTPUT RULES:\n- Do not output text outside of valid JSON format.\n- Use the provided PII party tokens (e.g. [PARTY_1]) strictly. No real names.\n- Rely heavily on Nigerian authorities (CFRN, specific Acts, decided cases).\n\nRETURN ONLY VALID JSON:\n{\n  \"legal_analysis\": \"Your rationale and strategy for the matter\",\n  \"research_brief\": {\n    \"statutes\": [\"list\"],\n    \"cases\": [\"list\"],\n    \"findings\": \"Detailed paragraph of legal findings\"\n  },\n  \"draft_document\": {\n    \"document_title\": \"Full title of the legal draft\",\n    \"document_type\": \"e.g. Agreement, Opinion, Court Process\",\n    \"body\": \"The exhaustive text of the legal draft, properly structured and formatted.\"\n  },\n  \"crm_outputs\": {\n    \"email_subject\": \"Cover email to client\",\n    \"email_body\": \"Dear [CLIENT], ...\",\n    \"linkedin_post\": \"Informative and legally compliant LinkedIn update focusing on the core concept...\"\n  },\n  \"instructions_to_lawyer\": [\"Critical checks for the human lawyer before approval\"]\n}",
+                "options": {}
+            },
+            "id": "master-agent-node",
+            "name": "Master Legal Agent (GPT-4o)",
+            "type": "@n8n/n8n-nodes-langchain.agent",
+            "typeVersion": 1.1,
+            "position": [
+                640,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "model": "gpt-4o",
+                "options": {
+                    "temperature": 0.15
+                }
+            },
+            "id": "master-llm",
+            "name": "GPT-4o Universal Model",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "typeVersion": 1,
+            "position": [
+                600,
+                640
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "openai-cred-id",
+                    "name": "OpenAI API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "name": "internal_memory",
+                "description": "Access past research briefs and legal matters stored in the firm's Pinecone internal repository."
+            },
+            "id": "pinecone-tool",
+            "name": "Internal Memory Tool",
+            "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+            "typeVersion": 1,
+            "position": [
+                850,
+                640
+            ]
+        },
+        {
+            "parameters": {
+                "pinconeIndex": "={{ $env.PINECONE_INDEX }}",
+                "options": {
+                    "pineconeNamespace": "approved_docs"
+                }
+            },
+            "id": "pinecone-vs",
+            "name": "Pinecone",
+            "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+            "typeVersion": 1,
+            "position": [
+                850,
+                800
+            ],
+            "credentials": {
+                "pineconeApi": {
+                    "id": "pinecone-cred-id",
+                    "name": "Pinecone API Key"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "model": "text-embedding-3-small"
+            },
+            "id": "agent-embeddings",
+            "name": "Embeddings",
+            "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+            "typeVersion": 1,
+            "position": [
+                1000,
+                800
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "openai-cred-id",
+                    "name": "OpenAI API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "name": "lawpavilion_search",
+                "description": "Custom Tool: Search LawPavilion API for specialized Nigerian case law and statutes.",
+                "method": "POST",
+                "url": "https://api.lawpavilion.com/v1/search",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "{\n  \"q\": \"{{ $query }}\",\n  \"jurisdiction\": \"nigeria\",\n  \"limit\": 5\n}",
+                "headers": {
+                    "values": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $env.LAWPAVILION_API_KEY }}"
+                        }
+                    ]
+                }
+            },
+            "id": "lawpavilion-tool",
+            "name": "LawPavilion Search Custom Tool",
+            "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+            "typeVersion": 1,
+            "position": [
+                1050,
+                640
+            ]
+        },
+        {
+            "parameters": {
+                "name": "web_search",
+                "description": "Broad web search tool for Nigerian property/business/technology news and legal updates."
+            },
+            "id": "web-tool",
+            "name": "Web Search Tool",
+            "type": "@n8n/n8n-nodes-langchain.toolTavily",
+            "typeVersion": 1,
+            "position": [
+                1250,
+                640
+            ],
+            "credentials": {
+                "tavilyApi": {
+                    "id": "tavily-cred-id",
+                    "name": "Tavily API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract, Parse, and Reconstruct the Master Agent JSON Output\n// PII tokens will be swapped back here.\nconst llmOut = $input.first().json.output || $input.first().json.text || '{}';\nconst context = $('Prepare Agent Context').first().json;\nconst tokenMap = context.token_map || {};\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(llmOut.replace(/```json|```/g, '').trim());\n} catch(e) {\n  parsed = {\n    legal_analysis: 'Parse Error - Master JSON corrupted',\n    draft_document: { document_title: 'Draft Error', body: 'The AI output could not be parsed.' },\n    research_brief: { findings: 'N/A' },\n    crm_outputs: { email_body: 'Error', linkedin_post: 'Error' },\n    instructions_to_lawyer: ['Manual intervention required.']\n  };\n}\n\n// PII Swap function\nconst restorePii = (text) => {\n  if (!text) return '';\n  let out = text;\n  for (const [token, realName] of Object.entries(tokenMap)) {\n    out = out.split(token).join(realName);\n  }\n  return out;\n};\n\n// Rebuild text with restored PII\nconst finalDraftBody = restorePii(parsed.draft_document?.body);\nconst finalResearch = restorePii(parsed.research_brief?.findings);\nconst finalEmail = restorePii(parsed.crm_outputs?.email_body);\n\n// Construct the Mega-Document Text to push to Google Docs\nconst megaDoc = `*** DRAFT \u2014 SUBJECT TO LAWYER REVIEW ***\\n\\n` +\n  `--- 1. LEGAL OPINION & STRATEGY ---\\n${parsed.legal_analysis}\\n\\n` +\n  `--- 2. RESEARCH FINDINGS ---\\nAuthorities: ${(parsed.research_brief?.statutes || []).join(', ')} | ${(parsed.research_brief?.cases || []).join(', ')}\\n${finalResearch}\\n\\n` +\n  `--- 3. MASTER LEGAL DRAFT ---\\nTitle: ${parsed.draft_document?.document_title}\\n\\n${finalDraftBody}\\n\\n` +\n  `--- 4. CLIENT COMMUNICATIONS (CRM) ---\\nSubject: ${parsed.crm_outputs?.email_subject}\\nEmail Body:\\n${finalEmail}\\n\\n` +\n  `LinkedIn Post:\\n${parsed.crm_outputs?.linkedin_post}`;\n\nreturn [{\n  json: {\n    ...context,\n    master_agent_output: parsed,\n    mega_doc_text: megaDoc,\n    mega_doc_title: '[MASTER DRAFT] ' + (parsed.draft_document?.document_title || context.matter_id),\n    matter_id: context.matter_id,\n    timestamp: new Date().toISOString(),\n    instructions: parsed.instructions_to_lawyer || []\n  }\n}];"
+            },
+            "id": "parse-master",
+            "name": "Parse Output & Restore PII",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                960,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "create",
+                "title": "={{ $json.mega_doc_title }}",
+                "content": "={{ $json.mega_doc_text }}"
+            },
+            "id": "create-mega-doc",
+            "name": "Create Unified Google Doc",
+            "type": "n8n-nodes-base.googleDocs",
+            "typeVersion": 2,
+            "position": [
+                1180,
+                400
+            ],
+            "credentials": {
+                "googleDocsOAuth2Api": {
+                    "id": "gdocs-cred-id",
+                    "name": "Google Docs OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const docJson = $input.first().json;\nconst masterCtx = $('Parse Output & Restore PII').first().json;\n\nconst fileId = docJson.id || docJson.documentId;\nconst driveUrl = docJson.documentUrl || (fileId ? `https://docs.google.com/document/d/${fileId}/edit` : '');\n\nconst agent_output = {\n  agent: 'master_agent',\n  output_type: 'unified_matter_pack',\n  document_title: masterCtx.mega_doc_title,\n  drive_url: driveUrl,\n  file_id: fileId,\n  matter_id: masterCtx.matter_id,\n  channel: masterCtx.channel,\n  sender: masterCtx.sender,\n  instructions_to_lawyer: masterCtx.instructions,\n  timestamp: masterCtx.timestamp,\n  requires_approval: true\n};\n\nreturn [{\n  json: {\n    ...masterCtx,\n    agent_output\n  }\n}];"
+            },
+            "id": "attach-mega-doc-url",
+            "name": "Attach Google Doc ID",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1400,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "record",
+                "operation": "create",
+                "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+                "tableId": "Drafts",
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "draft_id": "=MASTER-{{ $now.toMillis() }}",
+                        "matter_id": "={{ $json.matter_id }}",
+                        "document_title": "={{ $json.agent_output.document_title }}",
+                        "document_type": "Unified Matter Pack",
+                        "status": "Pending Approval",
+                        "drive_url": "={{ $json.agent_output.drive_url }}",
+                        "created_at": "={{ $json.timestamp }}",
+                        "instructions_to_lawyer": "={{ ($json.instructions || []).join('\\n') }}"
+                    }
+                }
+            },
+            "id": "log-master-airtable",
+            "name": "Log Universal Draft to Airtable",
+            "type": "n8n-nodes-base.airtable",
+            "typeVersion": 2,
+            "position": [
+                1620,
+                400
+            ],
+            "credentials": {
+                "airtableTokenApi": {
+                    "id": "airtable-cred-id",
+                    "name": "Airtable API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/approval-delivery",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "agent_outputs",
+                            "value": "={{ JSON.stringify([$json.agent_output]) }}"
+                        },
+                        {
+                            "name": "matter_context",
+                            "value": "={{ JSON.stringify($json.matter_context || { matter_id: $json.matter_id, channel: $json.channel, sender: $json.sender }) }}"
+                        },
+                        {
+                            "name": "matter_id",
+                            "value": "={{ $json.matter_id }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "bodyContentType": "json"
+                }
+            },
+            "id": "fwd-to-wf07-universal",
+            "name": "Forward to WF-07 (Approval Loop)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1840,
+                400
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "oscar-secret-header",
+                    "name": "Oscar Internal Secret"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Master Agent Intake": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Agent Context",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Agent Context": {
+            "main": [
+                [
+                    {
+                        "node": "Master Legal Agent (GPT-4o)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Master Legal Agent (GPT-4o)": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Output & Restore PII",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GPT-4o Universal Model": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "Master Legal Agent (GPT-4o)",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Internal Memory Tool": {
+            "ai_tool": [
+                [
+                    {
+                        "node": "Master Legal Agent (GPT-4o)",
+                        "type": "ai_tool",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LawPavilion Search Custom Tool": {
+            "ai_tool": [
+                [
+                    {
+                        "node": "Master Legal Agent (GPT-4o)",
+                        "type": "ai_tool",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Web Search Tool": {
+            "ai_tool": [
+                [
+                    {
+                        "node": "Master Legal Agent (GPT-4o)",
+                        "type": "ai_tool",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Pinecone": {
+            "ai_vectorStore": [
+                [
+                    {
+                        "node": "Internal Memory Tool",
+                        "type": "ai_vectorStore",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Embeddings": {
+            "ai_embedding": [
+                [
+                    {
+                        "node": "Pinecone",
+                        "type": "ai_embedding",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Output & Restore PII": {
+            "main": [
+                [
+                    {
+                        "node": "Create Unified Google Doc",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Create Unified Google Doc": {
+            "main": [
+                [
+                    {
+                        "node": "Attach Google Doc ID",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Attach Google Doc ID": {
+            "main": [
+                [
+                    {
+                        "node": "Log Universal Draft to Airtable",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Log Universal Draft to Airtable": {
+            "main": [
+                [
+                    {
+                        "node": "Forward to WF-07 (Approval Loop)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "tags": [
+        {
+            "name": "oscar-legal"
+        },
+        {
+            "name": "master-agent"
+        }
+    ],
+    "meta": {
+        "description": "Consolidated single-agent workflow handling Research, Drafting, and CRM within a single megacycle."
+    }
+}

@@ -1,0 +1,985 @@
+{
+    "name": "WF-07: Approval & Delivery Loop",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "approval-delivery",
+                "authentication": "headerAuth",
+                "responseMode": "onReceived",
+                "options": {}
+            },
+            "id": "wh-approval",
+            "name": "Receive Agent Outputs",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                200,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Build unified approval payload and restore PII for lawyer review\nconst inputs = $input.all();\nconst firstItem = inputs[0]?.json || {};\nconst mc = firstItem.matter_context || {};\nconst tokenMap = mc.token_map || {};\n\n// Collect all agent outputs\nconst agentOutputs = inputs\n  .map(i => i.json?.agent_output)\n  .filter(Boolean);\n\n// Build readable preview for lawyer\nlet previewParts = agentOutputs.map(ao => {\n  if (ao.agent === 'research') {\n    return `📚 *Research Brief*\\n${ao.content?.research_title || 'Research Output'}\\nFindings: ${(ao.content?.findings || []).length} items\\nSources: ${(ao.content?.sources_used || []).join(', ')}`;\n  } else if (ao.agent === 'drafting') {\n    return `📝 *Draft Document*\\n${ao.document_title || 'Legal Draft'}\\nVersion: ${ao.version}\\nDownload/Edit Link: ${ao.drive_url || 'Uploading to Drive...'}\\n\\n*Instructions:* ${(ao.instructions_to_lawyer || []).join(', ')}`;\n  } else if (ao.agent === 'crm') {\n    return `📧 *Communication Draft*\\n${ao.document_title || 'Client Communication'}\\nType: ${ao.output_type}`;\n  }\n  return `✅ Output from ${ao.agent} agent`;\n});\n\nlet combinedPreview = previewParts.join('\\n\\n');\n\n// Restore PII in the preview only (AI never saw these names)\nfor (const [token, realValue] of Object.entries(tokenMap)) {\n  combinedPreview = combinedPreview.split(token).join(realValue);\n}\n\nreturn [{\n  json: {\n    ...firstItem,\n    agent_outputs: agentOutputs,\n    channel: mc.channel || 'email',\n    sender: mc.sender,\n    matter_id: mc.matter_id,\n    preview_text: combinedPreview,\n    output_type: firstItem.output_type || 'multi_agent',\n    message: firstItem.message || null,\n    is_clarification: firstItem.output_type === 'clarification'\n  }\n}];"
+            },
+            "id": "build-approval-payload",
+            "name": "Build Approval Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                420,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "dataType": "string",
+                "value1": "={{ $json.channel }}",
+                "rules": {
+                    "rules": [
+                        {
+                            "operation": "equals",
+                            "value2": "whatsapp",
+                            "renameOutput": true,
+                            "outputKey": "whatsapp"
+                        },
+                        {
+                            "operation": "equals",
+                            "value2": "telegram",
+                            "renameOutput": true,
+                            "outputKey": "telegram"
+                        },
+                        {
+                            "operation": "equals",
+                            "value2": "email",
+                            "renameOutput": true,
+                            "outputKey": "email"
+                        }
+                    ]
+                },
+                "fallbackOutput": "extra",
+                "options": {}
+            },
+            "id": "route-channel",
+            "name": "Route by Source Channel",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 1,
+            "position": [
+                640,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "=https://api.twilio.com/2010-04-01/Accounts/{{ $env.TWILIO_ACCOUNT_SID }}/Messages.json",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpBasicAuth",
+                "sendBody": true,
+                "contentType": "form-urlencoded",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "From",
+                            "value": "=whatsapp:{{ $env.TWILIO_WHATSAPP_FROM }}"
+                        },
+                        {
+                            "name": "To",
+                            "value": "={{ $json.sender }}"
+                        },
+                        {
+                            "name": "Body",
+                            "value": "=⚖️ *Oscar Legal — Outputs Ready for Review*\nMatter: {{ $json.matter_id }}\n\n{{ $json.message || $json.preview_text }}\n\n---\nReply *APPROVE* to approve all outputs, *REJECT* to request changes, or *REVISE: [your notes]* with revision instructions."
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "send-whatsapp",
+            "name": "Send WhatsApp Review Request",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                860,
+                240
+            ],
+            "credentials": {
+                "httpBasicAuth": {
+                    "id": "twilio-cred-id",
+                    "name": "Twilio Basic Auth"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "={{ $json.sender }}",
+                "text": "=⚖️ *Oscar Legal — Outputs Ready for Review*\nMatter: `{{ $json.matter_id }}`\n\n{{ $json.message || $json.preview_text }}\n\n*Review Instructions:*\n1. Open the Google Doc link above.\n2. If it looks good, press *Approve*.\n3. If it needs changes, edit the Doc directly, then press *Approve*.\n4. To scrap it, press *Reject*.",
+                "additionalFields": {
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "✅ Approve",
+                                    "callback_data": "=APPROVE|{{ $json.matter_id }}"
+                                },
+                                {
+                                    "text": "✏️ Revise",
+                                    "callback_data": "=REVISE|{{ $json.matter_id }}"
+                                },
+                                {
+                                    "text": "❌ Reject",
+                                    "callback_data": "=REJECT|{{ $json.matter_id }}"
+                                }
+                            ]
+                        ]
+                    }
+                }
+            },
+            "id": "send-telegram",
+            "name": "Send Telegram Review Request",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+                860,
+                400
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "telegram-cred-id",
+                    "name": "Telegram API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "fromEmail": "={{ $env.FIRM_EMAIL_FROM }}",
+                "toEmail": "={{ $json.sender }}",
+                "subject": "=⚖️ Oscar Legal — Matter {{ $json.matter_id }}: Outputs Ready for Review",
+                "emailFormat": "html",
+                "html": "=<h2>Oscar Legal Practitioners</h2><h3>Matter {{ $json.matter_id }} — Outputs Ready</h3><p>{{ ($json.message || $json.preview_text).replace(/\\n/g, '<br>') }}</p><p><strong>Instructions:</strong></p><ul><li><strong>To Approve:</strong> Reply to this email with <strong>APPROVE</strong></li><li><strong>To Revise:</strong> Open the Google Doc link in the preview, edit it directly, and then reply with <strong>APPROVE</strong>.</li><li><strong>To Reject:</strong> Reply with <strong>REJECT</strong></li></ul><p><em>This communication is confidential and intended solely for the addressee.</em></p><hr><p>Oscar Legal Practice System</p>",
+                "options": {}
+            },
+            "id": "send-email",
+            "name": "Send Email Review Request",
+            "type": "n8n-nodes-base.emailSend",
+            "typeVersion": 2,
+            "position": [
+                860,
+                560
+            ],
+            "credentials": {
+                "smtp": {
+                    "id": "smtp-cred-id",
+                    "name": "Practice Email SMTP"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "amount": 48,
+                "unit": "hours",
+                "resume": "webhook",
+                "webhookSuffix": "={{ 'approval-' + $json.matter_id }}"
+            },
+            "id": "wait-whatsapp",
+            "name": "Wait for WhatsApp Reply (48h)",
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1,
+            "position": [
+                1080,
+                240
+            ]
+        },
+        {
+            "parameters": {
+                "amount": 48,
+                "unit": "hours",
+                "resume": "webhook",
+                "webhookSuffix": "={{ 'approval-tg-' + $json.matter_id }}"
+            },
+            "id": "wait-telegram",
+            "name": "Wait for Telegram Reply (48h)",
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1,
+            "position": [
+                1080,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "amount": 48,
+                "unit": "hours",
+                "resume": "webhook",
+                "webhookSuffix": "={{ 'approval-email-' + $json.matter_id }}"
+            },
+            "id": "wait-email",
+            "name": "Wait for Email Reply (48h)",
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1,
+            "position": [
+                1080,
+                560
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "combine",
+                "mergeByFields": {
+                    "values": []
+                },
+                "joinMode": "keepMatches",
+                "outputDataFrom": "all",
+                "options": {}
+            },
+            "id": "merge-replies",
+            "name": "Merge All Replies",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 2,
+            "position": [
+                1300,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "modelName": "gemini-1.5-flash",
+                "messages": {
+                    "values": [
+                        {
+                            "role": "system",
+                            "content": "=You are the Oscar Legal Practice Intelligence (LPI) module. Your role is to interpret communications from the Lead Lawyer regarding legal work products waiting for approval.\n\nCONTEXT:\nThe lawyer was sent a draft (via Google Doc) and has replied via chat/email. You must classify their intent.\n\nCLASSIFICATION RULES:\n1. approved: Lawyer intends to finalize, send, or publish. \n   - Keywords: 'ok', 'go', 'looks good', 'send it', 'proceed', 'confirmed'.\n   - Special Rule: If the lawyer implies they edited the doc themselves (e.g., 'I fixed it', 'I have edited the doc'), classify as approved.\n2. revise: Lawyer wants the AI to make changes based on text instructions.\n   - Keywords: 'Change the...', 'Add a clause...', 'Redo it'.\n   - Trigger if specific change instructions are detected or if a file is attached.\n3. rejected: Lawyer wants to discard the work.\n   - Keywords: 'discard', 'delete', 'stop', 'no', 'reject'.\n\nOUTPUT FORMAT:\nReturn ONLY a JSON object:\n{\n  \"approval_decision\": \"approved\" | \"rejected\" | \"revise\",\n  \"revision_feedback\": \"Concise summary of feedback\",\n  \"is_direct_edit\": boolean,\n  \"tone_analysis\": \"Note on lawyer mood\"\n}"
+                        },
+                        {
+                            "role": "user",
+                            "content": "=LAWYER'S REPLY: \n\"{{ $json.Body || $json.text || $json.message?.text || $json.data || $json.snippet || '' }}\"\n\nBINARY DATA PRESENT: {{ Object.keys($input.first().binary || {}).length > 0 }}\n\nAnalyze the reply and output the classification JSON."
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "parse-reply",
+            "name": "Parse Lawyer Decision",
+            "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+            "typeVersion": 1,
+            "position": [
+                1520,
+                400
+            ],
+            "credentials": {
+                "googlePalmApi": {
+                    "id": "gemini-cred-id",
+                    "name": "Google Gemini API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract and finalize AI decision with robust fallback\nconst inputs = $input.all();\nconst first = inputs[0].json;\nconst raw = first.output || first.message?.content || '{}';\n\nlet result = {};\ntry {\n  const jsonStr = raw.replace(/```json|```/g, '').trim();\n  result = JSON.parse(jsonStr);\n} catch(e) {\n  // Fallback to keyword scan if JSON fails\n  const text = raw.toUpperCase();\n  result = {\n    approval_decision: text.includes('APPROVE') ? 'approved' : text.includes('REJECT') ? 'rejected' : 'revise',\n    revision_feedback: raw,\n    is_direct_edit: text.includes('EDITED') || text.includes('FIXED'),\n    tone_analysis: 'Fallback detection'\n  };\n}\n\nreturn [{\n  json: {\n    ...first,\n    ...result,\n    approved_at: new Date().toISOString()\n  }\n}];"
+            },
+            "id": "finalize-decision",
+            "name": "Finalize AI Decision",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1710,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "dataType": "string",
+                "value1": "={{ $json.approval_decision }}",
+                "rules": {
+                    "rules": [
+                        {
+                            "operation": "equals",
+                            "value2": "approved",
+                            "renameOutput": true,
+                            "outputKey": "approved"
+                        },
+                        {
+                            "operation": "equals",
+                            "value2": "revise",
+                            "renameOutput": true,
+                            "outputKey": "revise"
+                        },
+                        {
+                            "operation": "equals",
+                            "value2": "rejected",
+                            "renameOutput": true,
+                            "outputKey": "rejected"
+                        }
+                    ]
+                },
+                "fallbackOutput": "extra",
+                "options": {}
+            },
+            "id": "route-decision",
+            "name": "Route Decision",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 1,
+            "position": [
+                1840,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "extractFromFile",
+                "binaryPropertyName": "data",
+                "options": {}
+            },
+            "id": "extract-revised-content",
+            "name": "Extract Revised Content",
+            "type": "n8n-nodes-base.extractFromFile",
+            "typeVersion": 1,
+            "position": [
+                1960,
+                720
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "embedding",
+                "operation": "create",
+                "model": "text-embedding-3-small",
+                "inputText": "=LAWYER APPROVED VERSION (GROUND TRUTH):\n{{ $json.text || $json.content || $('Parse Lawyer Decision').first().json.revision_feedback }}"
+            },
+            "id": "embed-revised",
+            "name": "Embed Lawyer Revision (Learning)",
+            "type": "@n8n/n8n-nodes-langchain.openAi",
+            "typeVersion": 1,
+            "position": [
+                2180,
+                720
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "openai-cred-id",
+                    "name": "OpenAI API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "=https://{{ $env.PINECONE_INDEX }}-{{ $env.PINECONE_PROJECT }}.svc.{{ $env.PINECONE_ENVIRONMENT }}.pinecone.io/vectors/upsert",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "vectors",
+                            "value": "=[{ \"id\": \"revised-{{ $('Parse Lawyer Decision').first().json.matter_id }}-{{ Date.now() }}\", \"values\": {{ JSON.stringify($json.data[0].embedding) }}, \"metadata\": { \"matter_id\": \"{{ $('Parse Lawyer Decision').first().json.matter_id }}\", \"content_type\": \"lawyer_correction\", \"source\": \"ground_truth\", \"date\": \"{{ new Date().toISOString() }}\" } }]"
+                        },
+                        {
+                            "name": "namespace",
+                            "value": "memory"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "pinecone-revised",
+            "name": "Store Revision as Learning Point",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                2400,
+                720
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "pinecone-cred-id",
+                    "name": "Pinecone API Key"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/orchestrator",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "is_rejection",
+                            "value": "true"
+                        },
+                        {
+                            "name": "rejection_feedback",
+                            "value": "={{ $json.revision_feedback }}"
+                        },
+                        {
+                            "name": "matter_id",
+                            "value": "={{ $json.matter_id }}"
+                        },
+                        {
+                            "name": "matter_context",
+                            "value": "={{ JSON.stringify($json.matter_context) }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "bodyContentType": "json"
+                }
+            },
+            "id": "loop-rejection",
+            "name": "Loop Back (Rejection Retry)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1960,
+                880
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "file",
+                "operation": "upload",
+                "filePrefix": "=REVISED-",
+                "options": {
+                    "parents": [
+                        "={{ $(\"Parse Lawyer Decision\").first().json.matter_context?.gdrive_folder_id }}"
+                    ]
+                }
+            },
+            "id": "upload-revised-file",
+            "name": "Upload Revised File to Drive",
+            "type": "n8n-nodes-base.googleDrive",
+            "typeVersion": 3,
+            "position": [
+                2180,
+                720
+            ],
+            "credentials": {
+                "googleDriveOAuth2Api": {
+                    "id": "gdrive-cred-id",
+                    "name": "Google Drive OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/matter-memory",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "file_id",
+                            "value": "={{ $(\"Parse Lawyer Decision\").first().json.approval_decision === 'approved' ? $json.agent_outputs[0].file_id : $json.id }}"
+                        },
+                        {
+                            "name": "matter_id",
+                            "value": "={{ $(\"Parse Lawyer Decision\").first().json.matter_id }}"
+                        },
+                        {
+                            "name": "action",
+                            "value": "ingest"
+                        }
+                    ]
+                },
+                "options": {
+                    "bodyContentType": "json"
+                }
+            },
+            "id": "trigger-memory",
+            "name": "Trigger Memory Ingestion (via GDrive)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                2400,
+                580
+            ]
+        },
+        {
+            "parameters": {
+                "resource": "record",
+                "operation": "create",
+                "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+                "tableId": "Approvals",
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "matter_id": "={{ $json.matter_id || $json.matter_context?.matter_id }}",
+                        "decision": "={{ $json.approval_decision }}",
+                        "feedback": "={{ $json.revision_feedback || '' }}",
+                        "approved_by": "={{ $json.sender || 'Lawyer' }}",
+                        "timestamp": "={{ $json.approved_at }}"
+                    }
+                }
+            },
+            "id": "log-approval",
+            "name": "Log Approval to Airtable",
+            "type": "n8n-nodes-base.airtable",
+            "typeVersion": 2,
+            "position": [
+                1960,
+                260
+            ],
+            "credentials": {
+                "airtableTokenApi": {
+                    "id": "airtable-cred-id",
+                    "name": "Airtable API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "resource": "file",
+                "operation": "update",
+                "fileId": {
+                    "mode": "id",
+                    "value": "={{ $json.agent_outputs[0].file_id }}"
+                },
+                "updateMode": "specificProperties",
+                "properties": {
+                    "name": "={{ $json.agent_outputs[0].document_title.replace(/[^a-zA-Z0-9]/g, '_') + '_' + $json.agent_outputs[0].version + '.txt' }}"
+                }
+            },
+            "id": "rename-approved-file",
+            "name": "Finalize: Remove [DRAFT] Prefix",
+            "type": "n8n-nodes-base.googleDrive",
+            "typeVersion": 3,
+            "position": [
+                2180,
+                260
+            ],
+            "credentials": {
+                "googleDriveOAuth2Api": {
+                    "id": "gdrive-cred-id",
+                    "name": "Google Drive OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "resource": "file",
+                "operation": "move",
+                "fileId": {
+                    "mode": "id",
+                    "value": "={{ $json.agent_outputs[0].file_id }}"
+                },
+                "driveId": {
+                    "mode": "list",
+                    "value": "={{ $env.GOOGLE_DRIVE_ID }}"
+                },
+                "folderId": {
+                    "mode": "id",
+                    "value": "={{ $json.matter_context?.gdrive_folder_id || $env.GOOGLE_DRIVE_MATTERS_FOLDER_ID }}"
+                },
+                "options": {}
+            },
+            "id": "move-approved-to-matter",
+            "name": "Move Approved Doc to Matter Folder",
+            "type": "n8n-nodes-base.googleDrive",
+            "typeVersion": 3,
+            "position": [
+                2400,
+                260
+            ],
+            "credentials": {
+                "googleDriveOAuth2Api": {
+                    "id": "gdrive-cred-id",
+                    "name": "Google Drive OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "dataType": "string",
+                "value1": "={{ $(\"Receive Agent Outputs\").item.json.agent_outputs[0].agent }}",
+                "rules": {
+                    "rules": [
+                        {
+                            "value2": "crm",
+                            "renameOutput": true,
+                            "outputKey": "crm"
+                        }
+                    ]
+                },
+                "fallbackOutput": "standard"
+            },
+            "id": "route-agent-type",
+            "name": "Route Approved by Agent",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 1,
+            "position": [
+                2180,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/crm-publish",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "agent_outputs",
+                            "value": "={{ JSON.stringify($(\"Receive Agent Outputs\").item.json.agent_outputs) }}"
+                        },
+                        {
+                            "name": "matter_context",
+                            "value": "={{ JSON.stringify($(\"Receive Agent Outputs\").item.json.matter_context) }}"
+                        },
+                        {
+                            "name": "matter_id",
+                            "value": "={{ $(\"Receive Agent Outputs\").item.json.matter_id }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "bodyContentType": "json"
+                }
+            },
+            "id": "crm-publish-redirect",
+            "name": "CRM Publish (Redirect)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                2400,
+                100
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "oscar-secret-header",
+                    "name": "Oscar Internal Secret"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "resource": "file",
+                "operation": "delete",
+                "fileId": {
+                    "mode": "id",
+                    "value": "={{ $json.agent_outputs[0].file_id }}"
+                }
+            },
+            "id": "delete-rejected-doc",
+            "name": "Delete Rejected Draft from Drive",
+            "type": "n8n-nodes-base.googleDrive",
+            "typeVersion": 3,
+            "position": [
+                1960,
+                1040
+            ],
+            "credentials": {
+                "googleDriveOAuth2Api": {
+                    "id": "gdrive-cred-id",
+                    "name": "Google Drive OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "={{ $(\"Parse Lawyer Decision\").first().json.sender }}",
+                "text": "=✅ *Memory Updated*\nMatter: `{{ $(\"Parse Lawyer Decision\").first().json.matter_id }}`\n\nThe approved document has been successfully committed to the firm's Ground-Truth memory. It will now be used as a stylistic and legal reference for future work."
+            },
+            "id": "tg-ingest-ok",
+            "name": "Telegram Ingest OK",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+                2600,
+                580
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "telegram-cred-id",
+                    "name": "Telegram API"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Receive Agent Outputs": {
+            "main": [
+                [
+                    {
+                        "node": "Build Approval Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Approval Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Route by Source Channel",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Route by Source Channel": {
+            "main": [
+                [
+                    {
+                        "node": "Send WhatsApp Review Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Send Telegram Review Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Send Email Review Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Send WhatsApp Review Request",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp Review Request": {
+            "main": [
+                [
+                    {
+                        "node": "Wait for WhatsApp Reply (48h)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send Telegram Review Request": {
+            "main": [
+                [
+                    {
+                        "node": "Wait for Telegram Reply (48h)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send Email Review Request": {
+            "main": [
+                [
+                    {
+                        "node": "Wait for Email Reply (48h)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait for WhatsApp Reply (48h)": {
+            "main": [
+                [
+                    {
+                        "node": "Merge All Replies",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait for Telegram Reply (48h)": {
+            "main": [
+                [
+                    {
+                        "node": "Merge All Replies",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Wait for Email Reply (48h)": {
+            "main": [
+                [
+                    {
+                        "node": "Merge All Replies",
+                        "type": "main",
+                        "index": 2
+                    }
+                ]
+            ]
+        },
+        "Merge All Replies": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Lawyer Decision",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Lawyer Decision": {
+            "main": [
+                [
+                    {
+                        "node": "Finalize AI Decision",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Finalize AI Decision": {
+            "main": [
+                [
+                    {
+                        "node": "Route Decision",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Route Decision": {
+            "main": [
+                [
+                    {
+                        "node": "Log Approval to Airtable",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Finalize: Remove [DRAFT] Prefix",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Upload Revised File to Drive",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Delete Rejected Draft from Drive",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Delete Rejected Draft from Drive": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Back (Rejection Retry)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Upload Revised File to Drive": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Memory Ingestion (via GDrive)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Finalize: Remove [DRAFT] Prefix": {
+            "main": [
+                [
+                    {
+                        "node": "Route Approved by Agent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Route Approved by Agent": {
+            "main": [
+                [
+                    {
+                        "node": "CRM Publish (Redirect)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Move Approved Doc to Matter Folder",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Move Approved Doc to Matter Folder": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Memory Ingestion (via GDrive)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Memory Ingestion (via GDrive)": {
+            "main": [
+                [
+                    {
+                        "node": "tg-ingest-ok",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "tg-ingest-ok": {
+            "main": [
+                []
+            ]
+        },
+        "Loop Back (Rejection Retry)": {
+            "main": [
+                []
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true
+    },
+    "tags": [
+        {
+            "name": "oscar-legal"
+        },
+        {
+            "name": "approval"
+        }
+    ],
+    "meta": {
+        "description": "WF-07: Routes agent outputs to lawyer via the originating channel (WhatsApp/Telegram/Email/Web). Uses Wait nodes to pause until reply. Parses APPROVE/REVISE/REJECT. On Approve: logs to Airtable, embeds to Pinecone. On Revise: loops back to Orchestrator with feedback."
+    }
+}

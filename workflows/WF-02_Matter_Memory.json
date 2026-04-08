@@ -1,0 +1,1114 @@
+{
+  "name": "WF-02: Matter Memory & ID Management (Supreme Architect)",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2976,
+        3424
+      ],
+      "id": "03797bbf-0b84-472d-8c7a-0d2c4af6c44e",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.action || ($json.file_id ? 'ingest' : 'intake') }}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "contains",
+              "value2": "intake"
+            },
+            {
+              "operation": "contains",
+              "value2": "ingest",
+              "output": 1
+            },
+            {
+              "operation": "contains",
+              "value2": "search",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "9ebe7e97-cff5-49db-a42f-d71852b161ea",
+      "name": "Action Router1",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        -2736,
+        3392
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.file_id }}"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "application/pdf",
+              "slidesToFormat": "application/pdf"
+            }
+          }
+        }
+      },
+      "id": "d7c71f14-b95b-4556-9da1-b689f6ffcff0",
+      "name": "Download for Ingestion",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2368,
+        3120
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kWwcdWaDwzyqO8Bn",
+          "name": "LP wf2 Gdrive download"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -2048,
+        3120
+      ],
+      "id": "ab0cfa92-1a42-413c-b208-30021296b7c7",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare payload for embedding\nconst item = $input.first().json;\nlet textToEmbed = '';\nconst action = item.action || (item.file_id ? 'ingest' : 'intake');\n\nif (action === 'intake') {\n  textToEmbed = `${item.summary} | Type: ${item.matter_type} | Parties: ${(item.real_parties || []).join(', ')}`;\n} else if (action === 'ingest') {\n  textToEmbed = `APPROVED DOCUMENT: ${item.document_title || item.title}\\nMatter: ${item.matter_id || 'unassigned'}\\nContent: ${item.text || item.clean_text}`;\n} else {\n  textToEmbed = item.query || item.clean_text || 'search';\n}\n\nreturn [{ json: { ...item, action, text_to_embed: textToEmbed } }];"
+      },
+      "id": "d8d0c4bd-8b25-4649-87f5-59aba65d5912",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2016,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "embeddings",
+        "model": "text-embedding-3-small",
+        "text": "={{ $json.text_to_embed }}"
+      },
+      "id": "openai-embeddings-node",
+      "name": "OpenAI Embeddings",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        -1952,
+        3664
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "8xFoketpNFZyU7Sp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "oscar-legal-memory",
+          "mode": "list",
+          "cachedResultName": "oscar-legal-memory"
+        },
+        "prompt": "={{ $('Normalize Payload').first().json.text_to_embed }}",
+        "options": {
+          "topK": "={{ $('Normalize Payload').first().json.action === 'search' ? 10 : 3 }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -1808,
+        3376
+      ],
+      "id": "5d03ec80-8515-4814-9913-6c5c2a93221b",
+      "name": "Pinecone Vector Store",
+      "credentials": {
+        "pineconeApi": {
+          "id": "mJwivkkx8brll8FK",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1808,
+        3664
+      ],
+      "id": "34161d3b-d7b5-4951-819a-5f436312fc2e",
+      "name": "Embeddings OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "8xFoketpNFZyU7Sp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst match = item.matches?.[0];\nconst isExisting = match && match.score >= 0.88;\nconst norm = $(\"Normalize Payload\").first().json;\n\n// We pull the vector from the OpenAI Embeddings node that preceded the search\nconst embeddingNode = $(\"OpenAI Embeddings\").first().json;\nconst vector = embeddingNode.data?.[0]?.embedding || null;\n\nreturn [{\n  json: {\n    ...norm,\n    embedding: vector,\n    semantic_results: item.matches || [],\n    is_new_matter: !isExisting,\n    matter_id: isExisting ? match.metadata.matter_id : (norm.matter_id || ''),\n    existing_matter_name: isExisting ? match.metadata.matter_name : null,\n    matched_score: match?.score || 0\n  }\n}];"
+      },
+      "id": "f5eff9c3-3308-43d3-ac20-fec013ae0fb1",
+      "name": "Check Similarity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1312,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.is_new_matter }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "15a59662-eb8f-433f-96cc-62f36b4cd164"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "12c153ee-e960-467d-9ba0-1134a21b06a3",
+      "name": "Is New Matter?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "record",
+        "operation": "list",
+        "base": {
+          "__rl": true,
+          "value": "appPJKYVqXtBFxYFb",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbl6Q603dyQceKNXK",
+          "mode": "id"
+        },
+        "additionalOptions": {
+          "sort": [
+            {
+              "field": "matter_id",
+              "direction": "desc"
+            }
+          ],
+          "maxRecords": 1
+        }
+      },
+      "id": "12e8e501-6509-4112-9ec6-8604fb6b2e00",
+      "name": "Get Latest Sequence No.",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        3360
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "LtoJqdUGjFD5h8A6",
+          "name": "Oscar Legal practitioners"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Matter ID: LP/YYYY/NNN\nconst intake = $(\"Check Similarity\").first().json;\nconst items = $input.all();\n\nconst year = new Date().getFullYear();\nlet seq = 1;\nif (items.length > 0 && items[0].json && items[0].json.matter_id) {\n  const lastId = items[0].json.matter_id;\n  seq = parseInt(lastId.split('/')[2] || '0') + 1;\n}\nconst matterId = `LP/${year}/${String(seq).padStart(3, '0')}`;\nconst matterName = `${intake.matter_type || 'Legal Matter'} — ${intake.timestamp?.slice(0,10) || new Date().toISOString().slice(0,10)}`;\n\nreturn [{\n  json: {\n    ...intake,\n    matter_id: matterId,\n    matter_name: matterName\n  }\n}];"
+      },
+      "id": "4291e200-ca86-4294-808c-675497b240de",
+      "name": "Generate Matter ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2128,
+        3936
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appPJKYVqXtBFxYFb",
+          "mode": "list",
+          "cachedResultName": "Oscar_Legal_Practitioners",
+          "cachedResultUrl": "https://airtable.com/appPJKYVqXtBFxYFb"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbl6Q603dyQceKNXK",
+          "mode": "list",
+          "cachedResultName": "Matters",
+          "cachedResultUrl": "https://airtable.com/appPJKYVqXtBFxYFb/tbl6Q603dyQceKNXK"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "matter_id": "={{ $json.matter_id }}",
+            "matter_name": "={{ $json.matter_name }}",
+            "matter_type": "={{ $json.matter_type }}",
+            "status": "Open",
+            "opened_date": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b4beac97-7f3f-4ca7-ae72-dbb54d0b6112",
+      "name": "Create Airtable Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -1872,
+        3936
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "LtoJqdUGjFD5h8A6",
+          "name": "Oscar Legal practitioners"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_DRIVE_MATTERS_FOLDER_ID }}"
+        },
+        "options": {
+          "folderName": "={{ $json.matter_id }}"
+        }
+      },
+      "id": "137075f8-0bcf-4c4f-ba29-784449a72b4d",
+      "name": "Create GDrive Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1616,
+        3936
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qU1digJnl2dwm1vU",
+          "name": "create gdrive folder"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPJKYVqXtBFxYFb",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbl6Q603dyQceKNXK",
+          "mode": "id"
+        },
+        "recordId": "={{ $('Create Airtable Record').first().json.id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "gdrive_folder_id": "={{ $json.id }}",
+             "drive_folder_url": "={{ $json.webViewLink }}"
+          }
+        }
+      },
+      "id": "790bf1c1-7d98-409b-be14-10d41ee0968d",
+      "name": "Save Folder ID to Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        3936
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "LtoJqdUGjFD5h8A6",
+          "name": "Oscar Legal practitioners"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPJKYVqXtBFxYFb",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbl6Q603dyQceKNXK",
+          "mode": "id"
+        },
+        "recordId": "={{ $json.is_new_matter ? $('Create Airtable Record').first().json.id : $json.matter_id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_activity": "={{ new Date().toISOString() }}",
+            "status": "Active"
+          }
+        }
+      },
+      "id": "67699330-e231-4eec-8ab3-3cc726009328",
+      "name": "Update Existing Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        4224
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "LtoJqdUGjFD5h8A6",
+          "name": "Oscar Legal practitioners"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Normalize Payload').first().json.action }}",
+              "rightValue": "ingest",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "5ecd6035-44ac-4d10-b34d-876392dc4852"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d0beb079-a363-429a-a5eb-ffa5138c5300",
+      "name": "Is Ingest?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1856,
+        4224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": "={{ $('Normalize Payload').first().json.file_id }}",
+        "folderId": "={{ $('Is New Matter?').first().json.is_new_matter ? $('Create GDrive Folder').first().json.id : $json.gdrive_folder_id }}",
+        "options": {}
+      },
+      "id": "4da0af43-047f-4b43-a805-aa17029bcf7a",
+      "name": "Move File to Matter Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1504,
+        4128
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kWwcdWaDwzyqO8Bn",
+          "name": "LP wf2 Gdrive download"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $env.PINECONE_INDEX }}-{{ $env.PINECONE_PROJECT }}.svc.{{ $env.PINECONE_ENVIRONMENT }}.pinecone.io/vectors/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vectors",
+              "value": "=[{ \"id\": \"{{ 'doc-' + Date.now() }}\", \"values\": {{ JSON.stringify($(\"OpenAI Embeddings\").first().json.data[0].embedding) }}, \"metadata\": { \"matter_id\": \"{{ $(\"Check Similarity\").first().json.matter_id }}\", \"content_type\": \"approved_document\", \"title\": \"{{ $(\"Normalize Payload\").first().json.document_title || 'Untitled' }}\", \"date\": \"{{ new Date().toISOString() }}\" } }]"
+            },
+            {
+              "name": "namespace",
+              "value": "approved_docs"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dc3c5530-3d06-4275-8ee7-1266f53752a4",
+      "name": "HTTP: Pinecone Upsert (Ingest)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -1184,
+        4128
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "oylIv9hsy320MfHH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL }}/webhook/approval-delivery",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "ingestion_feedback"
+            },
+            {
+              "name": "matter_id",
+              "value": "={{ $(\"Check Similarity\").first().json.matter_id }}"
+            },
+            {
+              "name": "message",
+              "value": "✅ Memory Complete: Document '{{ $(\"Normalize Payload\").first().json.document_title || 'Untitled' }}' has been successfully committed to the firm's central memory database."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "39aaa1cc-cd98-4f18-831d-15161c310ecb",
+      "name": "Notify Lawyer (via WF-07 Approval)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -848,
+        4128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Finalizing Memory Context for WF-03\nconst item = $input.first().json;\n\nif (item.action === 'search') {\n  return [{ json: {\n    ...item,\n    memory_brief: {\n      precedents: (item.semantic_results || []).slice(0, 3).map(m => m.metadata.text || m.metadata.title || m.metadata.matter_name),\n      summary: `Found ${item.semantic_results.length} relevant historical documents.`\n    }\n  }}];\n}\n\nreturn [{ json: item }]; "
+      },
+      "id": "26cf6126-731d-4f13-bd91-59344d7e9be0",
+      "name": "Assemble Rich Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        4352
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "E3pTPDHezT5w7Pd8",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/E3pTPDHezT5w7Pd8",
+          "cachedResultName": "WF-03: Master Legal Agent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -1328,
+        4352
+      ],
+      "id": "45cd3780-e16d-4cae-98a8-962d06477ac5",
+      "name": "Call 'WF-03: Master Legal Agent'"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "1GC6oAtgv3nXwYfplISz6qZrEvK2LhuGF",
+          "mode": "list",
+          "cachedResultName": "Matters",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1GC6oAtgv3nXwYfplISz6qZrEvK2LhuGF"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2384,
+        2464
+      ],
+      "id": "e657b0cd-6e0e-4ae1-8401-97627174deb7",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kWwcdWaDwzyqO8Bn",
+          "name": "LP wf2 Gdrive download"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "32f75fd6-460f-46bb-8489-fa08221b279e",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": ".pdf",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -2144,
+        2464
+      ],
+      "id": "18497fab-8eae-4b18-9b44-ba2c26ce4fb1",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "application/pdf",
+              "drawingsToFormat": "application/pdf",
+              "slidesToFormat": "application/pdf",
+              "sheetsToFormat": "application/pdf"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2144,
+        2592
+      ],
+      "id": "3d47192c-463f-4cdd-b9f8-9160f44803a7",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kWwcdWaDwzyqO8Bn",
+          "name": "LP wf2 Gdrive download"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -1968,
+        2592
+      ],
+      "id": "31f75d0c-8edf-48fc-8243-640bebd76ad7",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "oscar-legal-memory",
+          "mode": "list",
+          "cachedResultName": "oscar-legal-memory"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -1808,
+        2592
+      ],
+      "id": "6af2a49b-a01c-4925-af1d-9592d7d8e43f",
+      "name": "Pinecone Vector Store2",
+      "credentials": {
+        "pineconeApi": {
+          "id": "mJwivkkx8brll8FK",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1856,
+        2768
+      ],
+      "id": "45bcfeff-d6a0-4ccc-9047-8fd29635460c",
+      "name": "Embeddings OpenAI2",
+      "credentials": {
+        "openAiApi": {
+          "id": "8xFoketpNFZyU7Sp",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        -1712,
+        2784
+      ],
+      "id": "3d210caa-8098-478f-bc22-d0a05a9e5d61",
+      "name": "Default Data Loader1"
+    },
+    {
+      "parameters": {
+        "content": "Seperate ingestion pipeline for automatic ingestion of uploaded files\n",
+        "height": 544,
+        "width": 1376
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2672,
+        2416
+      ],
+      "typeVersion": 1,
+      "id": "55dd8f71-4e0b-4e0b-af7d-f16482a26c50",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Action Router1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Router1": {
+      "main": [
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download for Ingestion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download for Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Check Similarity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Similarity": {
+      "main": [
+        [
+          {
+            "node": "Is New Matter?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is New Matter?": {
+      "main": [
+        [
+          {
+            "node": "Get Latest Sequence No.",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Existing Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Latest Sequence No.": {
+      "main": [
+        [
+          {
+            "node": "Generate Matter ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Matter ID": {
+      "main": [
+        [
+          {
+            "node": "Create Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Airtable Record": {
+      "main": [
+        [
+          {
+            "node": "Create GDrive Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GDrive Folder": {
+      "main": [
+        [
+          {
+            "node": "Save Folder ID to Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Folder ID to Airtable": {
+      "main": [
+        [
+          {
+            "node": "Is Ingest?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Existing Airtable": {
+      "main": [
+        [
+          {
+            "node": "Is Ingest?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Ingest?1": {
+      "main": [
+        [
+          {
+            "node": "Move File to Matter Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assemble Rich Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move File to Matter Folder": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Pinecone Upsert (Ingest)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Pinecone Upsert (Ingest)1": {
+      "main": [
+        [
+          {
+            "node": "Notify Lawyer (via WF-07 Approval)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Rich Context": {
+      "main": [
+        [
+          {
+            "node": "Call 'WF-03: Master Legal Agent'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Vector Store2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store2": {
+      "main": [
+        []
+      ]
+    },
+    "Embeddings OpenAI2": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store2",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader1": {
+      "ai_document": [
+        [
+          {
+            "node": "Pinecone Vector Store2",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Check Similarity": [
+      {
+        "action": "ingest",
+        "text_to_embed": "undefined | Type: undefined | Parties: ",
+        "embedding": null,
+        "semantic_results": [],
+        "is_new_matter": true,
+        "matter_id": "",
+        "existing_matter_name": null,
+        "matched_score": 0
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1b783e21bf19fdea9a339c0f67271d3549f893f182abf93458cfb71c111dabee"
+  }
+}
