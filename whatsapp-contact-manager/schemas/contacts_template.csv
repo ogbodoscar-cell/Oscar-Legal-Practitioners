@@ -1,0 +1,3 @@
+name,phone,email,birthday,education,work,relationship_category,priority,busy_level,relationship_goal,notes,last_contacted_date,next_follow_up_date,cadence_days,relationship_plan_note,next_birthday_date,birthday_synced,followup_event_created,status
+Jane Doe,+2348012345678,jane.doe@example.com,1990-04-15,"University of Lagos - LLB",Partner at ABC Chambers,Professional,High,Very Busy,Explore co-counsel opportunities,,,,,,,false,false,Active
+Tunde Bello,+2348098765432,tunde.b@example.com,1988-11-02,"University of Ibadan - BSc Economics",Founder at Bello Ventures,Close Friend,High,Moderate,Stay close and support his startup,,,,,,,false,false,Active

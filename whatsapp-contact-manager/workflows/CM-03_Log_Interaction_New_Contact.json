@@ -1,0 +1,237 @@
+{
+  "name": "CM-03: Log Interaction / New Contact",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Log Contact Interaction",
+        "formDescription": "Log a conversation, or add a brand-new contact. Leave fields blank to keep the existing value for an existing contact.",
+        "formFields": {
+          "values": [
+            { "fieldLabel": "Contact Name", "requiredField": true },
+            { "fieldLabel": "Phone (e.g. +2348012345678)" },
+            { "fieldLabel": "Email" },
+            { "fieldLabel": "Birthday (YYYY-MM-DD)" },
+            { "fieldLabel": "Education" },
+            { "fieldLabel": "Work / Position" },
+            {
+              "fieldLabel": "Relationship Category",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "New Contact" },
+                  { "option": "Close Friend" },
+                  { "option": "Family" },
+                  { "option": "Professional" },
+                  { "option": "Mentor" },
+                  { "option": "Acquaintance" }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Priority",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "High" },
+                  { "option": "Medium" },
+                  { "option": "Low" }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Busy Level",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Very Busy" },
+                  { "option": "Moderate" },
+                  { "option": "Flexible" }
+                ]
+              }
+            },
+            { "fieldLabel": "Relationship Goal" },
+            { "fieldLabel": "Discussion Notes", "fieldType": "textarea" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-form",
+      "name": "Log Interaction Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "get-all-contacts",
+      "name": "Get All Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merges the form submission with any existing row for this contact (matched by name).\n// New contacts get sensible defaults; existing contacts keep their prior values unless overridden.\nconst form = $('Log Interaction Form').first().json;\nconst existingRows = $input.all().map(i => i.json);\nconst formName = (form['Contact Name'] || '').trim();\nconst match = existingRows.find(r => (r.name || '').trim().toLowerCase() === formName.toLowerCase());\n\nconst today = new Date().toISOString().split('T')[0];\nconst newNote = form['Discussion Notes'] ? `[${today}] ${form['Discussion Notes']}` : '';\n\nconst merged = {\n  name: formName,\n  phone: form['Phone (e.g. +2348012345678)'] || (match ? match.phone : ''),\n  email: form['Email'] || (match ? match.email : ''),\n  birthday: form['Birthday (YYYY-MM-DD)'] || (match ? match.birthday : ''),\n  education: form['Education'] || (match ? match.education : ''),\n  work: form['Work / Position'] || (match ? match.work : ''),\n  relationship_category: form['Relationship Category'] || (match ? match.relationship_category : 'New Contact'),\n  priority: form['Priority'] || (match ? match.priority : 'Medium'),\n  busy_level: form['Busy Level'] || (match ? match.busy_level : 'Moderate'),\n  relationship_goal: form['Relationship Goal'] || (match ? match.relationship_goal : ''),\n  notes: match && match.notes ? `${newNote}\\n${match.notes}`.trim() : newNote,\n  last_contacted_date: today,\n  birthday_synced: match ? (match.birthday_synced || 'false') : 'false',\n  status: match ? (match.status || 'Active') : 'Active'\n};\n\nreturn [{ json: merged }];"
+      },
+      "id": "merge-contact",
+      "name": "Merge Form + Existing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same cadence/relationship-plan logic as CM-01 — keep the two in sync if you tune the rules.\nconst BASE_DAYS = { High: 30, Medium: 60, Low: 120 };\nconst BUSY_MULTIPLIER = { 'Very Busy': 1.5, 'Moderate': 1, 'Flexible': 0.75 };\nconst APPROACH_NOTES = {\n  'New Contact': 'Reference how you met and something specific you discussed. Aim to convert this into a call or coffee within 30 days.',\n  'Close Friend': 'Casual, frequent check-ins are fine — suggest meeting in person when you can.',\n  'Family': 'Keep it personal and warm. Prioritize presence over frequency.',\n  'Professional': 'Lead with a genuine update, ask about their work, and add value (an article, an intro, an opportunity) before asking for anything.',\n  'Mentor': 'Come with a specific question or an update on advice they gave you. Respect their time — be concise.',\n  'Acquaintance': 'Low-pressure, occasional check-ins. A birthday message or a relevant share is enough to stay on their radar.'\n};\n\nfunction addDays(dateStr, days) {\n  const d = dateStr ? new Date(dateStr) : new Date();\n  if (isNaN(d.getTime())) d.setTime(Date.now());\n  d.setDate(d.getDate() + days);\n  return d.toISOString().split('T')[0];\n}\n\nfunction roundToWeek(days) {\n  return Math.max(7, Math.round(days / 7) * 7);\n}\n\nfunction nextBirthdayDate(birthdayStr) {\n  if (!birthdayStr) return '';\n  const b = new Date(birthdayStr);\n  if (isNaN(b.getTime())) return '';\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  let next = new Date(today.getFullYear(), b.getMonth(), b.getDate());\n  if (next < today) next = new Date(today.getFullYear() + 1, b.getMonth(), b.getDate());\n  return next.toISOString().split('T')[0];\n}\n\nconst c = $input.first().json;\nconst priority = c.priority || 'Medium';\nconst busy = c.busy_level || 'Moderate';\nconst category = c.relationship_category || 'Acquaintance';\n\nlet cadenceDays = BASE_DAYS[priority] ?? 60;\ncadenceDays = cadenceDays * (BUSY_MULTIPLIER[busy] ?? 1);\nif (category === 'New Contact') cadenceDays = Math.min(cadenceDays, 14);\ncadenceDays = roundToWeek(cadenceDays);\n\nconst nextFollowUpDate = addDays(c.last_contacted_date, cadenceDays);\nconst approach = APPROACH_NOTES[category] || APPROACH_NOTES['Acquaintance'];\n\nreturn [{\n  json: {\n    ...c,\n    cadence_days: cadenceDays,\n    next_follow_up_date: nextFollowUpDate,\n    relationship_plan_note: `Suggested cadence: every ${cadenceDays} days. ${approach}`,\n    next_birthday_date: nextBirthdayDate(c.birthday),\n    followup_event_created: 'true'\n  }\n}];"
+      },
+      "id": "compute-cadence",
+      "name": "Compute Cadence & Birthday",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "start": "={{ $json.next_follow_up_date }}T09:00:00",
+        "end": "={{ $json.next_follow_up_date }}T09:30:00",
+        "additionalFields": {
+          "summary": "={{ '🤝 Follow up with ' + $json.name }}",
+          "description": "={{ $json.relationship_plan_note + '\\n\\nLast notes: ' + ($json.notes || 'None') }}",
+          "remindersUi": {
+            "remindersValues": [
+              { "method": "popup", "minutes": 60 }
+            ]
+          }
+        }
+      },
+      "id": "create-followup-event",
+      "name": "Create Follow-up Reminder",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [1200, 400],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["name"],
+          "value": {
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "email": "={{ $json.email }}",
+            "birthday": "={{ $json.birthday }}",
+            "education": "={{ $json.education }}",
+            "work": "={{ $json.work }}",
+            "relationship_category": "={{ $json.relationship_category }}",
+            "priority": "={{ $json.priority }}",
+            "busy_level": "={{ $json.busy_level }}",
+            "relationship_goal": "={{ $json.relationship_goal }}",
+            "notes": "={{ $json.notes }}",
+            "last_contacted_date": "={{ $json.last_contacted_date }}",
+            "next_follow_up_date": "={{ $json.next_follow_up_date }}",
+            "cadence_days": "={{ $json.cadence_days }}",
+            "relationship_plan_note": "={{ $json.relationship_plan_note }}",
+            "next_birthday_date": "={{ $json.next_birthday_date }}",
+            "birthday_synced": "={{ $json.birthday_synced }}",
+            "followup_event_created": "true",
+            "status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-contact",
+      "name": "Save to Contacts Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.callmebot.com/whatsapp.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "phone", "value": "={{ $env.CALLMEBOT_PHONE }}" },
+            { "name": "text", "value": "={{ '✅ Logged ' + $json.name + '. Next follow-up: ' + $json.next_follow_up_date }}" },
+            { "name": "apikey", "value": "={{ $env.CALLMEBOT_APIKEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-confirmation",
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1700, 400]
+    }
+  ],
+  "connections": {
+    "Log Interaction Form": {
+      "main": [[{ "node": "Get All Contacts", "type": "main", "index": 0 }]]
+    },
+    "Get All Contacts": {
+      "main": [[{ "node": "Merge Form + Existing", "type": "main", "index": 0 }]]
+    },
+    "Merge Form + Existing": {
+      "main": [[{ "node": "Compute Cadence & Birthday", "type": "main", "index": 0 }]]
+    },
+    "Compute Cadence & Birthday": {
+      "main": [[{ "node": "Create Follow-up Reminder", "type": "main", "index": 0 }]]
+    },
+    "Create Follow-up Reminder": {
+      "main": [[{ "node": "Save to Contacts Sheet", "type": "main", "index": 0 }]]
+    },
+    "Save to Contacts Sheet": {
+      "main": [[{ "node": "Send Confirmation", "type": "main", "index": 0 }]]
+    }
+  }
+}

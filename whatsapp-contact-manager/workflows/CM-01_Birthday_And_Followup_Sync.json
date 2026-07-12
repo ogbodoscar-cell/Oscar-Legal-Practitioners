@@ -1,0 +1,291 @@
+{
+  "name": "CM-01: Birthday & Follow-up Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily 6AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "get-contacts",
+      "name": "Get Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Computes follow-up cadence, relationship plan note, and next birthday date for every contact.\n// Edit BASE_DAYS / BUSY_MULTIPLIER / APPROACH_NOTES below to tune the relationship logic.\nconst BASE_DAYS = { High: 30, Medium: 60, Low: 120 };\nconst BUSY_MULTIPLIER = { 'Very Busy': 1.5, 'Moderate': 1, 'Flexible': 0.75 };\nconst APPROACH_NOTES = {\n  'New Contact': 'Reference how you met and something specific you discussed. Aim to convert this into a call or coffee within 30 days.',\n  'Close Friend': 'Casual, frequent check-ins are fine — suggest meeting in person when you can.',\n  'Family': 'Keep it personal and warm. Prioritize presence over frequency.',\n  'Professional': 'Lead with a genuine update, ask about their work, and add value (an article, an intro, an opportunity) before asking for anything.',\n  'Mentor': 'Come with a specific question or an update on advice they gave you. Respect their time — be concise.',\n  'Acquaintance': 'Low-pressure, occasional check-ins. A birthday message or a relevant share is enough to stay on their radar.'\n};\n\nfunction addDays(dateStr, days) {\n  const d = dateStr ? new Date(dateStr) : new Date();\n  if (isNaN(d.getTime())) d.setTime(Date.now());\n  d.setDate(d.getDate() + days);\n  return d.toISOString().split('T')[0];\n}\n\nfunction roundToWeek(days) {\n  return Math.max(7, Math.round(days / 7) * 7);\n}\n\nfunction nextBirthdayDate(birthdayStr) {\n  if (!birthdayStr) return '';\n  const b = new Date(birthdayStr);\n  if (isNaN(b.getTime())) return '';\n  const today = new Date();\n  today.setHours(0, 0, 0, 0);\n  let next = new Date(today.getFullYear(), b.getMonth(), b.getDate());\n  if (next < today) next = new Date(today.getFullYear() + 1, b.getMonth(), b.getDate());\n  return next.toISOString().split('T')[0];\n}\n\nreturn $input.all().map(item => {\n  const c = item.json;\n  const priority = c.priority || 'Medium';\n  const busy = c.busy_level || 'Moderate';\n  const category = c.relationship_category || 'Acquaintance';\n\n  let cadenceDays = BASE_DAYS[priority] ?? 60;\n  cadenceDays = cadenceDays * (BUSY_MULTIPLIER[busy] ?? 1);\n  if (category === 'New Contact') cadenceDays = Math.min(cadenceDays, 14);\n  cadenceDays = roundToWeek(cadenceDays);\n\n  const nextFollowUpDate = c.next_follow_up_date || addDays(c.last_contacted_date, cadenceDays);\n  const approach = APPROACH_NOTES[category] || APPROACH_NOTES['Acquaintance'];\n\n  return {\n    json: {\n      ...c,\n      cadence_days: cadenceDays,\n      next_follow_up_date: nextFollowUpDate,\n      relationship_plan_note: `Suggested cadence: every ${cadenceDays} days. ${approach}`,\n      next_birthday_date: nextBirthdayDate(c.birthday)\n    }\n  };\n});"
+      },
+      "id": "compute-cadence",
+      "name": "Compute Cadence & Birthday",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.birthday }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "leftValue": "={{ $json.birthday_synced }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "leftValue": "={{ $json.status || 'Active' }}",
+              "rightValue": "Paused",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "needs-birthday-event",
+      "name": "Needs Birthday Event?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [950, 250]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "start": "={{ $json.next_birthday_date }}",
+        "end": "={{ $json.next_birthday_date }}",
+        "additionalFields": {
+          "summary": "={{ '🎂 ' + $json.name + \"'s Birthday\" }}",
+          "description": "={{ $json.relationship_plan_note }}",
+          "allday": "yes",
+          "rrule": "RRULE:FREQ=YEARLY",
+          "remindersUi": {
+            "remindersValues": [
+              { "method": "popup", "minutes": 540 },
+              { "method": "popup", "minutes": 4320 }
+            ]
+          }
+        }
+      },
+      "id": "create-birthday-event",
+      "name": "Create Birthday Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [1200, 250],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["row_number"],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "birthday_synced": "true"
+          }
+        },
+        "options": {}
+      },
+      "id": "mark-birthday-synced",
+      "name": "Mark Birthday Synced",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 250],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.next_follow_up_date }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "leftValue": "={{ $json.followup_event_created }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "leftValue": "={{ $json.status || 'Active' }}",
+              "rightValue": "Paused",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "needs-followup-event",
+      "name": "Needs Follow-up Event?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [950, 550]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "value": "primary",
+          "mode": "list",
+          "cachedResultName": "primary"
+        },
+        "start": "={{ $json.next_follow_up_date }}T09:00:00",
+        "end": "={{ $json.next_follow_up_date }}T09:30:00",
+        "additionalFields": {
+          "summary": "={{ '🤝 Follow up with ' + $json.name }}",
+          "description": "={{ $json.relationship_plan_note + '\\n\\nLast notes: ' + ($json.notes || 'None') }}",
+          "remindersUi": {
+            "remindersValues": [
+              { "method": "popup", "minutes": 60 }
+            ]
+          }
+        }
+      },
+      "id": "create-followup-event",
+      "name": "Create Follow-up Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [1200, 550],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["row_number"],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "followup_event_created": "true",
+            "next_follow_up_date": "={{ $json.next_follow_up_date }}",
+            "cadence_days": "={{ $json.cadence_days }}",
+            "relationship_plan_note": "={{ $json.relationship_plan_note }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "mark-followup-created",
+      "name": "Mark Follow-up Created",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1450, 550],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 6AM Trigger": {
+      "main": [[{ "node": "Get Contacts", "type": "main", "index": 0 }]]
+    },
+    "Get Contacts": {
+      "main": [[{ "node": "Compute Cadence & Birthday", "type": "main", "index": 0 }]]
+    },
+    "Compute Cadence & Birthday": {
+      "main": [
+        [
+          { "node": "Needs Birthday Event?", "type": "main", "index": 0 },
+          { "node": "Needs Follow-up Event?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Needs Birthday Event?": {
+      "main": [[{ "node": "Create Birthday Event", "type": "main", "index": 0 }]]
+    },
+    "Create Birthday Event": {
+      "main": [[{ "node": "Mark Birthday Synced", "type": "main", "index": 0 }]]
+    },
+    "Needs Follow-up Event?": {
+      "main": [[{ "node": "Create Follow-up Event", "type": "main", "index": 0 }]]
+    },
+    "Create Follow-up Event": {
+      "main": [[{ "node": "Mark Follow-up Created", "type": "main", "index": 0 }]]
+    }
+  }
+}
