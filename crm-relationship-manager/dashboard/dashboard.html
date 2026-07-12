@@ -1,0 +1,755 @@
+<!--
+  Design plan
+  Concept: "The Ledger" — a personal relationship notebook rendered as a working
+  dashboard. Warm literary serif for names/headings against a quiet, cool-paper
+  UI, so it reads as a book of people you keep, not a generic SaaS panel.
+
+  Color: page/surface are a sage-grey paper (not the cliché warm cream), ink is
+  a soft charcoal, brand accent is a steel-teal (fountain-pen ink). Status colors
+  (overdue/due-soon) and the six relationship-category hues are drawn from a
+  validated, colorblind-safe categorical set and kept strictly separate from the
+  accent so they never impersonate brand chrome.
+
+  Type: display serif (headings, contact names) + system sans (UI, labels,
+  notes) + monospace with tabular figures (dates, counts, cadence).
+
+  Layout: centered ledger column, stat strip up top, a two-column "this week"
+  spread (reach-out list / birthdays), a category breakdown, then the full
+  searchable, filterable contact table below.
+-->
+<title>Relationship Ledger</title>
+<style>
+  :root {
+    --page-bg: #f2f3ee;
+    --surface: #fcfcfa;
+    --surface-raised: #ffffff;
+    --ink-primary: #1b2124;
+    --ink-secondary: #52585a;
+    --ink-muted: #82887f;
+    --border: rgba(27, 33, 36, 0.11);
+    --border-strong: rgba(27, 33, 36, 0.18);
+    --accent: #2c5f6b;
+    --accent-ink: #ffffff;
+    --accent-soft: #e3edee;
+    --accent-soft-border: #c7dbdd;
+
+    --status-critical: #d03b3b;
+    --status-critical-soft: #fbe6e4;
+    --status-warning-ink: #8a5a00;
+    --status-warning-soft: #fdf0d3;
+
+    --cat-professional: #2a78d6;
+    --cat-mentor: #1baf7a;
+    --cat-close-friend: #eda100;
+    --cat-family: #008300;
+    --cat-acquaintance: #4a3aa7;
+    --cat-new-contact: #e87ba4;
+
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --shadow-card: 0 1px 2px rgba(27, 33, 36, 0.05), 0 6px 20px -12px rgba(27, 33, 36, 0.18);
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #14181a;
+      --surface: #1b2124;
+      --surface-raised: #20272a;
+      --ink-primary: #f1f0ea;
+      --ink-secondary: #b8bcb9;
+      --ink-muted: #82887f;
+      --border: rgba(241, 240, 234, 0.11);
+      --border-strong: rgba(241, 240, 234, 0.2);
+      --accent: #74b7c3;
+      --accent-ink: #0d2226;
+      --accent-soft: #1f3236;
+      --accent-soft-border: #2c4448;
+
+      --status-critical: #d03b3b;
+      --status-critical-soft: #3a1f1f;
+      --status-warning-ink: #f0c34f;
+      --status-warning-soft: #362a12;
+
+      --cat-professional: #3987e5;
+      --cat-mentor: #199e70;
+      --cat-close-friend: #c98500;
+      --cat-family: #008300;
+      --cat-acquaintance: #9085e9;
+      --cat-new-contact: #d55181;
+
+      --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -16px rgba(0, 0, 0, 0.6);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #14181a; --surface: #1b2124; --surface-raised: #20272a;
+    --ink-primary: #f1f0ea; --ink-secondary: #b8bcb9; --ink-muted: #82887f;
+    --border: rgba(241, 240, 234, 0.11); --border-strong: rgba(241, 240, 234, 0.2);
+    --accent: #74b7c3; --accent-ink: #0d2226; --accent-soft: #1f3236; --accent-soft-border: #2c4448;
+    --status-critical: #d03b3b; --status-critical-soft: #3a1f1f;
+    --status-warning-ink: #f0c34f; --status-warning-soft: #362a12;
+    --cat-professional: #3987e5; --cat-mentor: #199e70; --cat-close-friend: #c98500;
+    --cat-family: #008300; --cat-acquaintance: #9085e9; --cat-new-contact: #d55181;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --page-bg: #f2f3ee; --surface: #fcfcfa; --surface-raised: #ffffff;
+    --ink-primary: #1b2124; --ink-secondary: #52585a; --ink-muted: #82887f;
+    --border: rgba(27, 33, 36, 0.11); --border-strong: rgba(27, 33, 36, 0.18);
+    --accent: #2c5f6b; --accent-ink: #ffffff; --accent-soft: #e3edee; --accent-soft-border: #c7dbdd;
+    --status-critical: #d03b3b; --status-critical-soft: #fbe6e4;
+    --status-warning-ink: #8a5a00; --status-warning-soft: #fdf0d3;
+    --cat-professional: #2a78d6; --cat-mentor: #1baf7a; --cat-close-friend: #eda100;
+    --cat-family: #008300; --cat-acquaintance: #4a3aa7; --cat-new-contact: #e87ba4;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page-bg);
+    color: var(--ink-primary);
+    font-family: var(--font-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 24px 96px;
+  }
+
+  header.page-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 4vw, 38px);
+    font-weight: 500;
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .sync-line {
+    font-size: 13px;
+    color: var(--ink-muted);
+    margin-top: 8px;
+  }
+  .sync-line strong { color: var(--ink-secondary); font-weight: 600; }
+
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 9px 12px;
+    min-width: 240px;
+  }
+  .search-box svg { flex: none; color: var(--ink-muted); }
+  .search-box input {
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink-primary);
+    width: 100%;
+  }
+  .search-box input::placeholder { color: var(--ink-muted); }
+
+  /* stat strip */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 36px;
+  }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .stat-tile .n {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+  .stat-tile .label {
+    font-size: 12.5px;
+    color: var(--ink-secondary);
+    margin-top: 6px;
+  }
+  .stat-tile[data-tone="critical"] .n { color: var(--status-critical); }
+  .stat-tile[data-tone="warning"] .n { color: var(--status-warning-ink); }
+  .stat-tile[data-tone="accent"] .n { color: var(--accent); }
+
+  section.block { margin-bottom: 36px; }
+  .block-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  h2 {
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 500;
+    margin: 0;
+  }
+  .block-count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+
+  .spread {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 800px) { .spread { grid-template-columns: 1fr; } }
+
+  .card-list {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+  .empty-note {
+    padding: 22px 18px;
+    color: var(--ink-muted);
+    font-size: 14px;
+  }
+
+  .contact-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    cursor: default;
+  }
+  .contact-row:first-child { border-top: 0; }
+  .avatar-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-top: 7px;
+  }
+  .contact-main { flex: 1; min-width: 0; }
+  .contact-name-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .contact-name {
+    font-family: var(--font-display);
+    font-size: 16px;
+  }
+  .contact-work { font-size: 12.5px; color: var(--ink-muted); }
+  .contact-plan {
+    font-size: 13px;
+    color: var(--ink-secondary);
+    margin-top: 4px;
+  }
+  .chip {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: none;
+    align-self: flex-start;
+    margin-top: 1px;
+  }
+  .chip[data-tone="critical"] { color: var(--status-critical); background: var(--status-critical-soft); }
+  .chip[data-tone="warning"] { color: var(--status-warning-ink); background: var(--status-warning-soft); }
+  .chip[data-tone="muted"] { color: var(--ink-muted); background: var(--border); }
+
+  .birthday-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 13px 18px;
+    border-top: 1px solid var(--border);
+  }
+  .birthday-row:first-child { border-top: 0; }
+  .birthday-name { font-family: var(--font-display); font-size: 15.5px; }
+  .birthday-when {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-soft-border);
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  /* category breakdown */
+  .category-bars {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+    padding: 18px 20px 8px;
+  }
+  .cat-row {
+    display: grid;
+    grid-template-columns: 128px 1fr 34px;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .cat-label {
+    font-size: 13px;
+    color: var(--ink-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cat-swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .cat-track {
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .cat-fill { height: 100%; border-radius: 4px 0 0 4px; }
+  .cat-fill:only-child, .cat-fill.full { border-radius: 4px; }
+  .cat-count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink-muted);
+    text-align: right;
+  }
+
+  /* filter chips */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .filter-chip {
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--ink-secondary);
+    cursor: pointer;
+  }
+  .filter-chip:hover { border-color: var(--accent); }
+  .filter-chip:focus-visible, input:focus-visible, tr:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .filter-chip[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+
+  /* table */
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+  }
+  table { width: 100%; border-collapse: collapse; min-width: 720px; }
+  thead th {
+    text-align: left;
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    font-weight: 600;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.is-hidden { display: none; }
+  td.col-name { font-family: var(--font-display); font-size: 15px; }
+  td.col-next { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .notes-preview { color: var(--ink-secondary); max-width: 320px; }
+
+  footer.legend {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+</style>
+
+<div class="wrap">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">Personal Network</p>
+      <h1>Relationship Ledger</h1>
+      <p class="sync-line">Data as of <strong id="sync-date">—</strong> · ask Claude to "refresh my CRM" for the latest</p>
+    </div>
+    <div class="search-box">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+      <input id="search-input" type="text" placeholder="Search the ledger…" aria-label="Search contacts">
+    </div>
+  </header>
+
+  <section class="stats" id="stat-strip"></section>
+
+  <section class="block">
+    <div class="spread">
+      <div>
+        <div class="block-head">
+          <h2>Reach out this week</h2>
+          <span class="block-count" id="due-count"></span>
+        </div>
+        <div class="card-list" id="due-list"></div>
+      </div>
+      <div>
+        <div class="block-head">
+          <h2>Upcoming birthdays</h2>
+          <span class="block-count" id="birthday-count"></span>
+        </div>
+        <div class="card-list" id="birthday-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2>Network by relationship type</h2>
+      <span class="block-count" id="category-total"></span>
+    </div>
+    <div class="category-bars" id="category-bars"></div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2>Everyone</h2>
+      <span class="block-count" id="table-count"></span>
+    </div>
+    <div class="filters" id="category-filters" role="group" aria-label="Filter by relationship type"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Category</th>
+            <th>Priority</th>
+            <th>Next follow-up</th>
+            <th>Last note</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <footer class="legend" id="table-legend"></footer>
+  </section>
+</div>
+
+<!-- CRM_DATA_START -->
+<script id="crm-data" type="application/json">
+{
+  "generated_at": "2026-07-12",
+  "contacts": [
+    {
+      "name": "Jane Doe",
+      "phone": "+2348012345678",
+      "email": "jane.doe@example.com",
+      "birthday": "1990-04-15",
+      "education": "University of Lagos - LLB",
+      "work": "Partner at ABC Chambers",
+      "relationship_category": "Professional",
+      "priority": "High",
+      "busy_level": "Very Busy",
+      "relationship_goal": "Explore co-counsel opportunities",
+      "notes": [
+        {
+          "date": "2026-07-12",
+          "text": "Quick call, she's open to co-counseling the Lekki matter."
+        },
+        {
+          "date": "2026-06-02",
+          "text": "Met at the Lagos Bar Association mixer, discussed a possible arbitration referral."
+        }
+      ],
+      "last_contacted_date": "2026-07-12",
+      "next_follow_up_date": "2026-08-23",
+      "cadence_days": 42,
+      "relationship_plan_note": "Suggested cadence: every 42 days. Lead with a genuine update, ask about their work, and add value (an article, an intro, an opportunity) before asking for anything.",
+      "next_birthday_date": "2027-04-15",
+      "birthday_calendar_event_id": "p79b5lugki5u4qgs621r0av6ks",
+      "followup_calendar_event_id": "fqtg4mpk78ui6u9voco6khpkqg",
+      "status": "Active"
+    },
+    {
+      "name": "Tunde Bello",
+      "phone": "+2348098765432",
+      "email": "tunde.b@example.com",
+      "birthday": "1988-11-02",
+      "education": "University of Ibadan - BSc Economics",
+      "work": "Founder at Bello Ventures",
+      "relationship_category": "Close Friend",
+      "priority": "High",
+      "busy_level": "Moderate",
+      "relationship_goal": "Stay close and support his startup",
+      "notes": [
+        {
+          "date": "2026-05-20",
+          "text": "Caught up over lunch, he's raising a seed round in Q3."
+        }
+      ],
+      "last_contacted_date": "2026-05-20",
+      "next_follow_up_date": "2026-06-17",
+      "cadence_days": 28,
+      "relationship_plan_note": "Suggested cadence: every 28 days. Casual, frequent check-ins are fine \u2014 suggest meeting in person when you can.",
+      "next_birthday_date": "2026-11-02",
+      "birthday_calendar_event_id": "dkohe76pvg2tvorrql839h131g",
+      "followup_calendar_event_id": "0nuqumaiatgjbtdlj69vn177ds",
+      "status": "Active"
+    },
+    {
+      "name": "Tola Adigun",
+      "phone": "",
+      "email": "",
+      "birthday": "",
+      "education": "",
+      "work": "Judge's Clerk",
+      "relationship_category": "New Contact",
+      "priority": "Medium",
+      "busy_level": "Moderate",
+      "relationship_goal": "",
+      "notes": [
+        {
+          "date": "2026-07-12",
+          "text": "Met at the bar dinner"
+        }
+      ],
+      "last_contacted_date": "2026-07-12",
+      "birthday_calendar_event_id": null,
+      "followup_calendar_event_id": "j1mf7guk106qf2vqnpu47uh7o8",
+      "status": "Active",
+      "cadence_days": 14,
+      "next_follow_up_date": "2026-07-26",
+      "relationship_plan_note": "Suggested cadence: every 14 days. Reference how you met and something specific you discussed. Aim to convert this into a call or coffee within 30 days.",
+      "next_birthday_date": ""
+    }
+  ]
+}
+</script>
+<!-- CRM_DATA_END -->
+
+<script>
+(function () {
+  const raw = JSON.parse(document.getElementById('crm-data').textContent);
+  const contacts = raw.contacts.filter(c => c.status !== 'Paused');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  const CATEGORY_COLOR = {
+    'Professional': 'var(--cat-professional)',
+    'Mentor': 'var(--cat-mentor)',
+    'Close Friend': 'var(--cat-close-friend)',
+    'Family': 'var(--cat-family)',
+    'Acquaintance': 'var(--cat-acquaintance)',
+    'New Contact': 'var(--cat-new-contact)',
+  };
+  const CATEGORY_ORDER = ['Professional', 'Mentor', 'Close Friend', 'Family', 'Acquaintance', 'New Contact'];
+
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    return Math.round((d - today) / 86400000);
+  }
+  function fmtDate(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  function fmtRelative(days) {
+    if (days < 0) return `${Math.abs(days)}d overdue`;
+    if (days === 0) return 'today';
+    if (days === 1) return 'tomorrow';
+    return `in ${days}d`;
+  }
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  }
+
+  document.getElementById('sync-date').textContent = new Date(raw.generated_at + 'T00:00:00')
+    .toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
+  // --- derived sets ---
+  const overdue = contacts.filter(c => daysUntil(c.next_follow_up_date) !== null && daysUntil(c.next_follow_up_date) < 0);
+  const dueThisWeek = contacts.filter(c => {
+    const d = daysUntil(c.next_follow_up_date);
+    return d !== null && d >= 0 && d <= 7;
+  });
+  const dueAll = [...overdue, ...dueThisWeek].sort((a, b) => daysUntil(a.next_follow_up_date) - daysUntil(b.next_follow_up_date));
+
+  const birthdaysSoon = contacts
+    .map(c => ({ c, d: daysUntil(c.next_birthday_date || c.birthday) }))
+    .filter(x => x.d !== null && x.d >= 0 && x.d <= 30)
+    .sort((a, b) => a.d - b.d);
+  const birthdaysThisWeek = birthdaysSoon.filter(x => x.d <= 7);
+
+  // --- stat strip ---
+  const stats = [
+    { n: overdue.length, label: 'Overdue follow-ups', tone: 'critical' },
+    { n: dueThisWeek.length, label: 'Due this week', tone: 'warning' },
+    { n: birthdaysSoon.length, label: 'Birthdays in 30 days', tone: 'accent' },
+    { n: contacts.length, label: 'People in your network', tone: '' },
+  ];
+  document.getElementById('stat-strip').innerHTML = stats.map(s => `
+    <div class="stat-tile" data-tone="${s.tone}">
+      <div class="n">${s.n}</div>
+      <div class="label">${s.label}</div>
+    </div>`).join('');
+
+  // --- reach out this week ---
+  const dueListEl = document.getElementById('due-list');
+  document.getElementById('due-count').textContent = dueAll.length ? `${dueAll.length}` : '';
+  if (!dueAll.length) {
+    dueListEl.innerHTML = '<p class="empty-note">No one is due for follow-up. Enjoy the quiet week. 🎉</p>';
+  } else {
+    dueListEl.innerHTML = dueAll.map(c => {
+      const d = daysUntil(c.next_follow_up_date);
+      const tone = d < 0 ? 'critical' : (d <= 2 ? 'warning' : 'muted');
+      const color = CATEGORY_COLOR[c.relationship_category] || 'var(--ink-muted)';
+      return `
+        <div class="contact-row">
+          <span class="avatar-dot" style="background:${color}"></span>
+          <div class="contact-main">
+            <div class="contact-name-line">
+              <span class="contact-name">${escapeHtml(c.name)}</span>
+              ${c.work ? `<span class="contact-work">${escapeHtml(c.work)}</span>` : ''}
+            </div>
+            <div class="contact-plan">${escapeHtml(c.relationship_plan_note || '')}</div>
+          </div>
+          <span class="chip" data-tone="${tone}">${fmtRelative(d)}</span>
+        </div>`;
+    }).join('');
+  }
+
+  // --- birthdays ---
+  const bdayListEl = document.getElementById('birthday-list');
+  document.getElementById('birthday-count').textContent = birthdaysSoon.length ? `${birthdaysSoon.length}` : '';
+  if (!birthdaysSoon.length) {
+    bdayListEl.innerHTML = '<p class="empty-note">Nothing in the next 30 days.</p>';
+  } else {
+    bdayListEl.innerHTML = birthdaysSoon.map(({ c, d }) => `
+      <div class="birthday-row">
+        <span class="birthday-name">${escapeHtml(c.name)}</span>
+        <span class="birthday-when">${fmtRelative(d)}</span>
+      </div>`).join('');
+  }
+
+  // --- category breakdown ---
+  const counts = {};
+  CATEGORY_ORDER.forEach(cat => counts[cat] = 0);
+  contacts.forEach(c => { counts[c.relationship_category] = (counts[c.relationship_category] || 0) + 1; });
+  const maxCount = Math.max(1, ...Object.values(counts));
+  document.getElementById('category-total').textContent = `${contacts.length} total`;
+  document.getElementById('category-bars').innerHTML = CATEGORY_ORDER.map(cat => `
+    <div class="cat-row">
+      <span class="cat-label"><span class="cat-swatch" style="background:${CATEGORY_COLOR[cat]}"></span>${cat}</span>
+      <span class="cat-track"><span class="cat-fill${counts[cat] === maxCount ? ' full' : ''}" style="width:${(counts[cat] / maxCount) * 100}%;background:${CATEGORY_COLOR[cat]}"></span></span>
+      <span class="cat-count">${counts[cat]}</span>
+    </div>`).join('');
+
+  // --- filters + table ---
+  const filtersEl = document.getElementById('category-filters');
+  const activeCats = new Set();
+  filtersEl.innerHTML = CATEGORY_ORDER.map(cat => `
+    <button type="button" class="filter-chip" data-cat="${escapeHtml(cat)}" aria-pressed="false">${cat}</button>`).join('');
+
+  const tbody = document.getElementById('table-body');
+  const sorted = [...contacts].sort((a, b) => a.name.localeCompare(b.name));
+  document.getElementById('table-count').textContent = `${sorted.length}`;
+
+  function renderRows() {
+    const query = document.getElementById('search-input').value.trim().toLowerCase();
+    tbody.innerHTML = sorted.map(c => {
+      const lastNote = (c.notes && c.notes[0]) ? c.notes[0].text : '—';
+      const matchesQuery = !query || c.name.toLowerCase().includes(query) || (c.work || '').toLowerCase().includes(query);
+      const matchesCat = activeCats.size === 0 || activeCats.has(c.relationship_category);
+      const hidden = !(matchesQuery && matchesCat);
+      const color = CATEGORY_COLOR[c.relationship_category] || 'var(--ink-muted)';
+      return `
+        <tr class="${hidden ? 'is-hidden' : ''}">
+          <td class="col-name">${escapeHtml(c.name)}</td>
+          <td><span class="cat-swatch" style="display:inline-block;background:${color};margin-right:7px;border-radius:2px"></span>${escapeHtml(c.relationship_category)}</td>
+          <td>${escapeHtml(c.priority)}</td>
+          <td class="col-next">${fmtDate(c.next_follow_up_date)}</td>
+          <td class="notes-preview">${escapeHtml(lastNote)}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  filtersEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.filter-chip');
+    if (!btn) return;
+    const cat = btn.dataset.cat;
+    if (activeCats.has(cat)) { activeCats.delete(cat); btn.setAttribute('aria-pressed', 'false'); }
+    else { activeCats.add(cat); btn.setAttribute('aria-pressed', 'true'); }
+    renderRows();
+  });
+  document.getElementById('search-input').addEventListener('input', renderRows);
+
+  document.getElementById('table-legend').innerHTML = CATEGORY_ORDER.map(cat =>
+    `<span><span class="cat-swatch" style="display:inline-block;background:${CATEGORY_COLOR[cat]};margin-right:5px;border-radius:2px;vertical-align:middle"></span>${cat}</span>`
+  ).join('');
+
+  renderRows();
+})();
+</script>

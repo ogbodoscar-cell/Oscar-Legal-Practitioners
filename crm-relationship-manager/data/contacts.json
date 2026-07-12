@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-07-12",
+  "contacts": [
+    {
+      "name": "Jane Doe",
+      "phone": "+2348012345678",
+      "email": "jane.doe@example.com",
+      "birthday": "1990-04-15",
+      "education": "University of Lagos - LLB",
+      "work": "Partner at ABC Chambers",
+      "relationship_category": "Professional",
+      "priority": "High",
+      "busy_level": "Very Busy",
+      "relationship_goal": "Explore co-counsel opportunities",
+      "notes": [
+        {
+          "date": "2026-07-12",
+          "text": "Quick call, she's open to co-counseling the Lekki matter."
+        },
+        {
+          "date": "2026-06-02",
+          "text": "Met at the Lagos Bar Association mixer, discussed a possible arbitration referral."
+        }
+      ],
+      "last_contacted_date": "2026-07-12",
+      "next_follow_up_date": "2026-08-23",
+      "cadence_days": 42,
+      "relationship_plan_note": "Suggested cadence: every 42 days. Lead with a genuine update, ask about their work, and add value (an article, an intro, an opportunity) before asking for anything.",
+      "next_birthday_date": "2027-04-15",
+      "birthday_calendar_event_id": "p79b5lugki5u4qgs621r0av6ks",
+      "followup_calendar_event_id": "fqtg4mpk78ui6u9voco6khpkqg",
+      "status": "Active"
+    },
+    {
+      "name": "Tunde Bello",
+      "phone": "+2348098765432",
+      "email": "tunde.b@example.com",
+      "birthday": "1988-11-02",
+      "education": "University of Ibadan - BSc Economics",
+      "work": "Founder at Bello Ventures",
+      "relationship_category": "Close Friend",
+      "priority": "High",
+      "busy_level": "Moderate",
+      "relationship_goal": "Stay close and support his startup",
+      "notes": [
+        {
+          "date": "2026-05-20",
+          "text": "Caught up over lunch, he's raising a seed round in Q3."
+        }
+      ],
+      "last_contacted_date": "2026-05-20",
+      "next_follow_up_date": "2026-06-17",
+      "cadence_days": 28,
+      "relationship_plan_note": "Suggested cadence: every 28 days. Casual, frequent check-ins are fine \u2014 suggest meeting in person when you can.",
+      "next_birthday_date": "2026-11-02",
+      "birthday_calendar_event_id": "dkohe76pvg2tvorrql839h131g",
+      "followup_calendar_event_id": "0nuqumaiatgjbtdlj69vn177ds",
+      "status": "Active"
+    },
+    {
+      "name": "Tola Adigun",
+      "phone": "",
+      "email": "",
+      "birthday": "",
+      "education": "",
+      "work": "Judge's Clerk",
+      "relationship_category": "New Contact",
+      "priority": "Medium",
+      "busy_level": "Moderate",
+      "relationship_goal": "",
+      "notes": [
+        {
+          "date": "2026-07-12",
+          "text": "Met at the bar dinner"
+        }
+      ],
+      "last_contacted_date": "2026-07-12",
+      "birthday_calendar_event_id": null,
+      "followup_calendar_event_id": "j1mf7guk106qf2vqnpu47uh7o8",
+      "status": "Active",
+      "cadence_days": 14,
+      "next_follow_up_date": "2026-07-26",
+      "relationship_plan_note": "Suggested cadence: every 14 days. Reference how you met and something specific you discussed. Aim to convert this into a call or coffee within 30 days.",
+      "next_birthday_date": ""
+    }
+  ]
+}
